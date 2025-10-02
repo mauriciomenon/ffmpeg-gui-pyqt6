@@ -15,13 +15,14 @@ from io import BytesIO
 from functools import partial
 
 from PyQt6 import QtWidgets, QtCore
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox, QFileDialog, QCheckBox, QHBoxLayout, QVBoxLayout
+from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox, QFileDialog, QCheckBox, QHBoxLayout, QVBoxLayout, QProgressDialog
 
 class FFmpegGuiPyQt6(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Conversor de Vídeo Avançado (PyQt6)')
         self.resize(900, 700)
+        self._proc = None  # QProcess for non-blocking conversion
         self._build_ui()
 
     def _build_ui(self):
@@ -153,8 +154,10 @@ class FFmpegGuiPyQt6(QWidget):
         btn_layout.addWidget(load_btn)
         save_btn = QPushButton('Salvar Configuração'); save_btn.clicked.connect(self.save_config)
         btn_layout.addWidget(save_btn)
-        convert_btn = QPushButton('Converter'); convert_btn.clicked.connect(self.convert_video)
-        btn_layout.addWidget(convert_btn)
+        self.convert_btn = QPushButton('Converter'); self.convert_btn.clicked.connect(self.convert_video)
+        btn_layout.addWidget(self.convert_btn)
+        self.cancel_btn = QPushButton('Cancelar'); self.cancel_btn.setEnabled(False); self.cancel_btn.clicked.connect(self.cancel_convert)
+        btn_layout.addWidget(self.cancel_btn)
         layout.addLayout(btn_layout)
 
         self.setLayout(layout)
@@ -300,15 +303,63 @@ class FFmpegGuiPyQt6(QWidget):
         self.command_display.setPlainText(' '.join(shlex.quote(a) for a in args))
 
     def convert_video(self):
+        if self._proc is not None:
+            QtWidgets.QMessageBox.warning(self, 'Em execução', 'Uma conversão já está em andamento.')
+            return
         args = self.build_command_list()
         if not args:
             QtWidgets.QMessageBox.warning(self, 'Erro', 'Preencha os campos necessários')
             return
+        # Use QProcess to avoid freezing UI
+        self._proc = QtCore.QProcess(self)
+        self._proc.setProgram(args[0])
+        self._proc.setArguments(args[1:])
+        self._proc.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+        self._proc.readyReadStandardOutput.connect(self._on_proc_output)
+        self._proc.finished.connect(self._on_proc_finished)
+        self._proc.errorOccurred.connect(self._on_proc_error)
+        self.convert_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self._append_log('Iniciando conversão...')
+        self._proc.start()
+
+    def cancel_convert(self):
+        if self._proc is not None:
+            self._append_log('Cancelando conversão...')
+            self._proc.kill()
+
+    def _on_proc_output(self):
+        if self._proc is None:
+            return
+        data = self._proc.readAllStandardOutput()
         try:
-            subprocess.run(args, check=True)
+            text = bytes(data).decode('utf-8', errors='ignore')
+        except Exception:
+            text = str(data)
+        self._append_log(text)
+
+    def _on_proc_finished(self, code, status):
+        ok = (code == 0)
+        self.convert_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self._proc = None
+        if ok:
             QtWidgets.QMessageBox.information(self, 'Sucesso', 'Vídeo convertido com sucesso!')
-        except subprocess.CalledProcessError as e:
-            QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao converter vídeo.\nErro: {e}')
+        else:
+            QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao converter vídeo (código {code}).')
+
+    def _on_proc_error(self, err):
+        self.convert_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self._proc = None
+        QtWidgets.QMessageBox.critical(self, 'Erro', f'Erro de processo: {err}')
+
+    def _append_log(self, msg):
+        prev = self.command_display.toPlainText()
+        if prev:
+            self.command_display.setPlainText(prev + "\n" + msg)
+        else:
+            self.command_display.setPlainText(msg)
 
     def show_about(self):
         QtWidgets.QMessageBox.information(self, 'About', 'Mauricio Menon (+AI)\nhttps://github.com/mauriciomenon\nPyQt6 version of the GUI')
@@ -331,9 +382,6 @@ class FFmpegGuiPyQt6(QWidget):
         if not candidate or not os.path.exists(candidate):
             candidate = ffprobe_name  # rely on PATH
         ffprobe = candidate
-        if not os.path.exists(ffprobe):
-            QtWidgets.QMessageBox.critical(self, 'Erro', 'ffprobe não encontrado no caminho do ffmpeg')
-            return
         try:
             command = [ffprobe, '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', inp]
             p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -351,6 +399,8 @@ class FFmpegGuiPyQt6(QWidget):
             v.addWidget(b)
             dlg.setLayout(v)
             dlg.exec()
+        except FileNotFoundError:
+            QtWidgets.QMessageBox.critical(self, 'Erro', 'ffprobe não encontrado (verifique PATH ou caminho configurado).')
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao obter info: {e}')
 
@@ -363,18 +413,33 @@ class FFmpegGuiPyQt6(QWidget):
         self.update_command_display()
 
     # -------- FFmpeg download helpers --------
+    def _http_get(self, url: str, timeout: int = 60) -> bytes:
+        """Download URL returning raw bytes. Tries requests first, then urllib as fallback."""
+        try:
+            import requests  # type: ignore
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            return resp.content
+        except Exception:
+            # Fallback to urllib
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
+                if resp.status != 200:
+                    raise RuntimeError(f"HTTP {resp.status}")
+                return resp.read()
     def _get_latest_ffmpeg_windows_zip_url(self):
         # Try GitHub API (BtbN/FFmpeg-Builds) for latest win64 gpl zip; fallback to a known asset name
         try:
-            import requests
+            import urllib.request, json as _json
             api = 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest'
-            resp = requests.get(api, timeout=10)
-            if resp.ok:
-                data = resp.json()
-                for asset in data.get('assets', []):
-                    name = asset.get('name','')
-                    if name.endswith('win64-gpl.zip'):
-                        return asset.get('browser_download_url')
+            req = urllib.request.Request(api, headers={'User-Agent': 'ffmpeg-gui'})
+            with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
+                if resp.status == 200:
+                    data = _json.loads(resp.read().decode('utf-8'))
+                    for asset in data.get('assets', []):
+                        name = asset.get('name','')
+                        if name.endswith('win64-gpl.zip'):
+                            return asset.get('browser_download_url')
         except Exception:
             pass
         # Fallback to latest/download with a common asset name
@@ -398,29 +463,63 @@ class FFmpegGuiPyQt6(QWidget):
         return ffmpeg_path
 
     def download_ffmpeg_and_maybe_install(self):
-        # On non-Windows, open releases page; on Windows, download and extract
-        if platform.system() != 'Windows':
-            webbrowser.open('https://github.com/BtbN/FFmpeg-Builds/releases')
-            QtWidgets.QMessageBox.information(self, 'FFmpeg', 'Em sistemas não Windows, abrimos a página de releases para download manual.')
-            return
+        # Provide non-blocking download with a progress dialog and platform handling
+        prog = QProgressDialog('Baixando FFmpeg...', 'Cancelar', 0, 0, self)
+        prog.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+        prog.setAutoClose(True)
+        prog.show()
 
         def worker():
             try:
-                import requests
-                url = self._get_latest_ffmpeg_windows_zip_url()
-                r = requests.get(url, timeout=30)
-                r.raise_for_status()
-                ff = self._extract_ffmpeg_zip(r.content)
-                if ff:
-                    # Update UI on main thread
-                    QtCore.QTimer.singleShot(0, lambda: self.ffmpeg_path.setText(ff))
-                    QtCore.QTimer.singleShot(0, lambda: self.show_info_msg('FFmpeg baixado e extraído com sucesso.'))
+                sysname = platform.system()
+                if sysname == 'Windows':
+                    url = self._get_latest_ffmpeg_windows_zip_url()
+                    content = self._http_get(url, timeout=60)
+                    ff = self._extract_ffmpeg_zip(content)
+                    if ff:
+                        QtCore.QTimer.singleShot(0, lambda: self.ffmpeg_path.setText(ff))
+                        QtCore.QTimer.singleShot(0, lambda: self.show_info_msg('FFmpeg baixado e extraído com sucesso.'))
+                    else:
+                        QtCore.QTimer.singleShot(0, lambda: self.show_error_msg('Não foi possível localizar o executável ffmpeg após extração.'))
                 else:
-                    QtCore.QTimer.singleShot(0, lambda: self.show_error_msg('Não foi possível localizar o executável ffmpeg após extração.'))
+                    # Linux/macOS: tentar um build estático conhecido (johnvansickle para Linux; Brew instruções no macOS)
+                    if sysname == 'Linux':
+                        arch = platform.machine().lower()
+                        if arch in ('aarch64', 'arm64'):
+                            url = 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz'
+                        else:
+                            url = 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz'
+                        content = self._http_get(url, timeout=60)
+                        # extrair para ./bin e apontar para bin/ffmpeg
+                        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
+                        os.makedirs(base_dir, exist_ok=True)
+                        import tarfile
+                        with tarfile.open(fileobj=BytesIO(content), mode='r:xz') as tf:
+                            tf.extractall(base_dir)
+                        # procurar binário
+                        ffmpeg_path = None
+                        for root, dirs, files in os.walk(base_dir):
+                            for f in files:
+                                if f == 'ffmpeg':
+                                    ffmpeg_path = os.path.join(root, f)
+                                    break
+                            if ffmpeg_path:
+                                break
+                        if ffmpeg_path:
+                            QtCore.QTimer.singleShot(0, lambda: self.ffmpeg_path.setText(ffmpeg_path))
+                            QtCore.QTimer.singleShot(0, lambda: self.show_info_msg('FFmpeg baixado e pronto (build estático).'))
+                        else:
+                            QtCore.QTimer.singleShot(0, lambda: self.show_error_msg('Não foi possível localizar o ffmpeg extraído.'))
+                    elif sysname == 'Darwin':
+                        QtCore.QTimer.singleShot(0, lambda: webbrowser.open('https://formulae.brew.sh/formula/ffmpeg'))
+                        QtCore.QTimer.singleShot(0, lambda: self.show_info_msg('No macOS, instale via Homebrew: brew install ffmpeg'))
             except Exception as e:
                 QtCore.QTimer.singleShot(0, lambda: self.show_error_msg(f'Falha no download: {e}'))
+            finally:
+                QtCore.QTimer.singleShot(0, prog.cancel)
 
-        threading.Thread(target=worker, daemon=True).start()
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
 
     def install_ffmpeg_via_winget(self):
         if platform.system() != 'Windows':
