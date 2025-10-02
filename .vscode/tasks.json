@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "setup venv",
+      "type": "shell",
+      "command": "python3 -m venv .venv && . .venv/bin/activate && python -m pip install --upgrade pip",
+      "problemMatcher": []
+    },
+    {
+      "label": "install deps",
+      "type": "shell",
+      "command": ". .venv/bin/activate && python -m pip install -r requirements.txt",
+      "problemMatcher": []
+    },
+    {
+      "label": "pytest",
+      "type": "shell",
+      "command": "QT_QPA_PLATFORM=offscreen . .venv/bin/activate && pytest -q",
+      "problemMatcher": []
+    },
+    {
+      "label": "run PyQt6 GUI",
+      "type": "shell",
+      "command": ". .venv/bin/activate && python GUI_pyqt6_WINFF.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "run Tkinter GUI",
+      "type": "shell",
+      "command": ". .venv/bin/activate && python GUI_tkinter_WINFF.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "install hooks",
+      "type": "shell",
+      "command": "git config core.hooksPath .githooks && chmod +x .githooks/pre-commit",
+      "problemMatcher": []
+    }
+  ]
+}
