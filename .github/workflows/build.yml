@@ -171,9 +171,23 @@ jobs:
       - name: Package artifacts (Debian)
         shell: bash
         run: |
-          mkdir -p artifacts
+          set -euo pipefail
+          mkdir -p artifacts pkg
+          # Copy raw binaries
           cp dist/WINFF-GUI-PyQt6 artifacts/WINFF-GUI-PyQt6-debian-x64
           cp dist/WINFF-GUI-Tkinter artifacts/WINFF-GUI-Tkinter-debian-x64
+          # Build simple .deb packages (version from CI run number)
+          VER="0.0.0-ci-${GITHUB_RUN_NUMBER:-0}"
+          for app in WINFF-GUI-PyQt6 WINFF-GUI-Tkinter; do
+            pkgname=$(echo "$app" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+            pkgdir="pkg/${pkgname}_${VER}_amd64"
+            mkdir -p "$pkgdir/DEBIAN" "$pkgdir/usr/local/bin"
+            cp "dist/${app}" "$pkgdir/usr/local/bin/${app}"
+            chmod 0755 "$pkgdir/usr/local/bin/${app}"
+            printf 'Package: %s\nVersion: %s\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: GitHub Actions <noreply@github.local>\nDescription: FFmpeg GUI (%s) built via CI for Debian 13 (bookworm)\n' \
+              "$pkgname" "$VER" "$app" > "$pkgdir/DEBIAN/control"
+            dpkg-deb -b "$pkgdir" "artifacts/${pkgname}_${VER}_amd64.deb"
+          done
 
       - name: Upload artifacts (Debian)
         uses: actions/upload-artifact@v4
