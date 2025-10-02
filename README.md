@@ -1,6 +1,6 @@
 # ffmpeg-gui-pyqt6
 
-Repositório criado a pedido do usuário. Contém:
+Contém:
 
 - `GUI_tkinter_WINFF.py` — Versão Tkinter (completa) copiada/adaptada do repositório original (Mauricio Menon).
 - `GUI_pyqt6_WINFF.py` — Conversão funcional da GUI para PyQt6 (mesmas opções principais: seleção de arquivo, diretório de saída, codecs, bitrate, resolução, preview do comando FFmpeg, execução da conversão, exibir info via ffprobe).
