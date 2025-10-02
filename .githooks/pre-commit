@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MAX=$((102760448)) # 98MB in bytes
+
+echo "[pre-commit] Checking file sizes (max 98MB)..."
+# Check staged files
+while IFS= read -r -d '' f; do
+  if [ -f "$f" ]; then
+    sz=$(wc -c <"$f" | tr -d ' ')
+    if [ "$sz" -ge "$MAX" ]; then
+      echo "Error: staged file exceeds 98MB: $f ($sz bytes)" >&2
+      exit 1
+    fi
+  fi
+done < <(git diff --cached --name-only -z)
+
+# Check tracked files as extra safety
+while IFS= read -r -d '' f; do
+  if [ -f "$f" ]; then
+    sz=$(wc -c <"$f" | tr -d ' ')
+    if [ "$sz" -ge "$MAX" ]; then
+      echo "Error: tracked file exceeds 98MB: $f ($sz bytes)" >&2
+      exit 1
+    fi
+  fi
+done < <(git ls-files -z)
+
+echo "[pre-commit] Running pytest (if available)..."
+if command -v pytest >/dev/null 2>&1; then
+  QT_QPA_PLATFORM=offscreen pytest -q
+elif [ -x ".venv/bin/pytest" ]; then
+  QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q
+else
+  echo "pytest not found, skipping tests. Install with: python -m pip install -r requirements.txt" >&2
+fi
+
+echo "[pre-commit] OK"

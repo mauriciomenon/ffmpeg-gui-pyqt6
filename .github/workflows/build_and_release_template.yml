@@ -7,18 +7,8 @@ name: build-and-release-template
 # 4) Push to default branch to build; create a tag vX.Y.Z to publish a Release with assets.
 
 on:
-  push:
-    branches: [ master, main ]
-    paths:
-      - '**/*.py'
-      - '.github/workflows/**'
-      - 'requirements.txt'
-  pull_request:
-    branches: [ master, main ]
-    paths:
-      - '**/*.py'
-      - '.github/workflows/**'
-      - 'requirements.txt'
+  # Template disabled by default to avoid unintentional runs/costs.
+  # To use it, copy to a new workflow file and enable triggers explicitly.
   workflow_dispatch: {}
 
 env:

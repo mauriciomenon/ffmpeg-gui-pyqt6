@@ -1,22 +1,38 @@
 name: release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Manual only; require explicit cost confirmation
+  workflow_dispatch:
+    inputs:
+      confirm_cost:
+        description: "Type YES to confirm you understand this release build consumes CI minutes and may incur costs."
+        required: true
+        default: "NO"
+      profile:
+        description: "Build profile (minimal = low-cost emergency, full = all OS/arch)"
+        required: true
+        type: choice
+        options:
+          - minimal
+          - full
+        default: minimal
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: ${{ github.event.inputs.confirm_cost == 'YES' }}
     name: Build release artifacts
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, windows-11-arm, macos-13, macos-14, ubuntu-latest, ubuntu-22.04-arm]
+        os: ${{ fromJSON(github.event.inputs.profile == 'full' && '["windows-latest","windows-11-arm","macos-13","macos-14","ubuntu-latest","ubuntu-22.04-arm"]' || '["ubuntu-latest"]') }}
         python-version: ['3.11']
+    env:
+      PROFILE: ${{ github.event.inputs.profile }}
+      BUILD_PYQT: ${{ github.event.inputs.profile == 'full' && 'true' || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,8 +42,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install Qt dev tools (Linux only)
-        if: runner.os == 'Linux'
+      - name: Install Qt dev tools (Linux only, full profile)
+        if: runner.os == 'Linux' && env.BUILD_PYQT == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -41,8 +57,8 @@ jobs:
             sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0 || true
           fi
 
-      - name: Check qmake (Linux only)
-        if: runner.os == 'Linux'
+      - name: Check qmake (Linux only, full profile)
+        if: runner.os == 'Linux' && env.BUILD_PYQT == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -57,8 +73,12 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install PyQt6; fi
-          pip install pyinstaller requests ffmpeg-python
+          if [ "$PROFILE" = "full" ]; then
+            if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install PyQt6; fi
+          else
+            pip install ffmpeg-python requests || true
+          fi
+          pip install pyinstaller
 
       - name: Install Linux extras (patchelf)
         if: runner.os == 'Linux'
@@ -68,12 +88,13 @@ jobs:
             sudo apt-get update && sudo apt-get install -y patchelf
           fi
 
-      - name: Build PyQt6 app
+      - name: Build PyQt6 app (full profile only)
+        if: env.BUILD_PYQT == 'true'
         shell: bash
         run: |
           pyinstaller --name ffmpeg-gui-pyqt6 --noconfirm --onefile --windowed GUI_pyqt6_WINFF.py
 
-      - name: Build Tkinter app
+      - name: Build Tkinter app (always)
         shell: bash
         run: |
           pyinstaller --name ffmpeg-gui-tkinter --noconfirm --onefile --windowed GUI_tkinter_WINFF.py
