@@ -32,15 +32,3 @@ python GUI_pyqt6_WINFF.py
 ```bash
 python GUI_tkinter_WINFF.py
 ```
-
-Observações
-
-- Os executáveis `ffmpeg` e `ffprobe` precisam estar disponíveis e corretos (ou configurar o caminho na interface).
-- Se quiser que eu crie a pasta local `~/git/ffmpeg-gui-pyqt6` e coloque uma cópia do repo nela, diga "sim, crie a pasta local" e eu faço isso.
-
----
-
-Se quiser, eu posso também:
-- Adicionar testes unitários mínimos ou um script de smoke test.
-- Criar um instalador/packaging básico.
-- Tornar a interface mais modular (separar lógica de UI).
