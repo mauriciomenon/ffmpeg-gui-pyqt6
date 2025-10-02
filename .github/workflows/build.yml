@@ -35,6 +35,37 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install Qt dev tools (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            # Try Qt6 first (qmake6 provided by qt6-base-dev-tools on Debian/Ubuntu)
+            sudo apt-get install -y --no-install-recommends \
+              build-essential \
+              qt6-base-dev qt6-base-dev-tools || true
+            # Fallback to Qt5 packages if Qt6 not available on the image
+            sudo apt-get install -y --no-install-recommends \
+              qtbase5-dev qtbase5-dev-tools qtchooser qt5-qmake || true
+            # Useful runtime libs sometimes needed by PyInstaller apps
+            sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0 || true
+          fi
+
+      - name: Check qmake (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          which qmake6 || true
+          which qmake || true
+          qmake6 --version || true
+          qmake --version || true
+          # Export QMAKE for downstream build tooling if present
+          if command -v qmake6 >/dev/null 2>&1; then echo "QMAKE=$(which qmake6)" >> $GITHUB_ENV; 
+          elif command -v qmake >/dev/null 2>&1; then echo "QMAKE=$(which qmake)" >> $GITHUB_ENV; fi
+
       - name: Install dependencies
         shell: bash
         run: |
