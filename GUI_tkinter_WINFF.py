@@ -17,6 +17,7 @@ import tarfile
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from utils_safe_extract import safe_tar_extract, safe_zip_extract
+import ssl
 
 import importlib
 try:
@@ -295,7 +296,10 @@ class FFmpegGuiTk(tk.Tk):
 	def _reader_worker(self):
 		try:
 			assert self._proc is not None
-			for line in self._proc.stdout:
+			while True:
+				line = self._proc.stdout.readline()
+				if not line:
+					break
 				self._log_q.put(line.rstrip())
 		except Exception as e:
 			self._log_q.put(f"[erro leitor]: {e}")
@@ -307,12 +311,13 @@ class FFmpegGuiTk(tk.Tk):
 				self._append_log(line)
 		except queue.Empty:
 			pass
-		# if process still alive, reschedule; else finalize
-		if self._proc is not None and self._proc.poll() is None:
+		alive = (self._proc is not None and self._proc.poll() is None)
+		if alive and self._reader_thread is not None and self._reader_thread.is_alive():
 			self.after(200, self._poll_logs)
 		else:
 			code = None if self._proc is None else self._proc.returncode
 			self._proc = None
+			self._reader_thread = None
 			self.convert_btn.configure(state='normal')
 			self.cancel_btn.configure(state='disabled')
 			if code == 0:
@@ -418,13 +423,16 @@ class FFmpegGuiTk(tk.Tk):
 		"""Download com requests (se disponível) e fallback para urllib."""
 		if requests is not None:
 			try:
-				r = requests.get(url, timeout=timeout)
+				r = requests.get(url, timeout=timeout, verify=True)
 				r.raise_for_status()
 				return r.content
 			except Exception:
 				pass
 		import urllib.request
-		with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
+		ctx = ssl.create_default_context()
+		ctx.check_hostname = True
+		ctx.verify_mode = ssl.CERT_REQUIRED
+		with urllib.request.urlopen(url, timeout=timeout, context=ctx) as resp:  # nosec B310
 			return resp.read()
 
 	def download_ffmpeg_and_maybe_install(self):

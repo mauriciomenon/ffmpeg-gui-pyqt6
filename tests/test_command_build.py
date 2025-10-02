@@ -1,7 +1,53 @@
 from importlib import import_module
+import sys
+import types
+
+
+def _stub_pyqt6():
+    if 'PyQt6' in sys.modules:
+        return
+    qt = types.ModuleType('PyQt6')
+    qtwidgets = types.ModuleType('PyQt6.QtWidgets')
+    qtcore = types.ModuleType('PyQt6.QtCore')
+    # Provide dummy classes used in import statements
+    for name in [
+        'QApplication','QWidget','QLabel','QLineEdit','QPushButton','QTextEdit',
+        'QComboBox','QFileDialog','QCheckBox','QHBoxLayout','QVBoxLayout','QProgressDialog'
+    ]:
+        setattr(qtwidgets, name, type(name, (), {}))
+    # Minimal decorator used in the module (@QtCore.pyqtSlot)
+    qtcore.pyqtSlot = lambda *args, **kwargs: (lambda f: f)
+    qt.QtWidgets = qtwidgets
+    qt.QtCore = qtcore
+    sys.modules['PyQt6'] = qt
+    sys.modules['PyQt6.QtWidgets'] = qtwidgets
+    sys.modules['PyQt6.QtCore'] = qtcore
+
+
+def _stub_tkinter():
+    if 'tkinter' in sys.modules:
+        return
+    tk = types.ModuleType('tkinter')
+    # Minimal Tk class to support class definition inheritance
+    tk.Tk = type('Tk', (), {})
+    ttk = types.ModuleType('ttk')
+    filedialog = types.ModuleType('filedialog')
+    messagebox = types.ModuleType('messagebox')
+    # Expose submodules as attributes to support `from tkinter import ...`
+    tk.ttk = ttk
+    tk.filedialog = filedialog
+    tk.messagebox = messagebox
+    # Mark as a package to be safe
+    tk.__path__ = []  # type: ignore[attr-defined]
+    sys.modules['tkinter'] = tk
+    sys.modules['ttk'] = ttk
+    sys.modules['tkinter.ttk'] = ttk
+    sys.modules['tkinter.filedialog'] = filedialog
+    sys.modules['tkinter.messagebox'] = messagebox
 
 
 def test_pyqt6_build_command_list_defaults(monkeypatch):
+    _stub_pyqt6()
     # Avoid importing PyQt6 in CI to keep tests light.
     # Instead, test the command assembly logic by stubbing the minimal API.
     m = import_module('GUI_pyqt6_WINFF')
@@ -32,6 +78,7 @@ def test_pyqt6_build_command_list_defaults(monkeypatch):
 
 
 def test_tkinter_build_command_list_defaults(monkeypatch):
+    _stub_tkinter()
     m = import_module('GUI_tkinter_WINFF')
 
     class Stub:

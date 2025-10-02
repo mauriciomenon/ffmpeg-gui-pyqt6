@@ -12,6 +12,7 @@ import tempfile
 import zipfile
 import shlex
 import tarfile
+import ssl
 from io import BytesIO
 from functools import partial
 from utils_safe_extract import safe_tar_extract, safe_zip_extract
@@ -352,15 +353,16 @@ class FFmpegGuiPyQt6(QWidget):
 
     def _on_proc_finished(self, code, status):
         ok = (code == 0)
-        self._finalize_proc()
+        # Show dialog first, then finalize to avoid brief window where Convert is re-enabled during dialog
         if ok:
             QtWidgets.QMessageBox.information(self, 'Sucesso', 'Vídeo convertido com sucesso!')
         else:
             QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao converter vídeo (código {code}).')
+        self._finalize_proc()
 
     def _on_proc_error(self, err):
-        self._finalize_proc()
         QtWidgets.QMessageBox.critical(self, 'Erro', f'Erro de processo: {err}')
+        self._finalize_proc()
 
     def _append_log(self, msg):
         # Efficient append without rewriting whole buffer
@@ -387,13 +389,27 @@ class FFmpegGuiPyQt6(QWidget):
         if not candidate or not os.path.exists(candidate):
             candidate = ffprobe_name  # rely on PATH
         ffprobe = candidate
+        # Run ffprobe non-blocking using QProcess
         try:
-            command = [ffprobe, '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', inp]
-            p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            out, err = p.communicate()
-            if p.returncode != 0:
-                raise RuntimeError('ffprobe error')
-            data = json.loads(out)
+            self._info_proc = QtCore.QProcess(self)
+            self._info_proc.setProgram(ffprobe)
+            self._info_proc.setArguments(['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', inp])
+            self._info_proc.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+            self._info_proc.finished.connect(self._on_info_finished)
+            self._info_proc.errorOccurred.connect(lambda err: QtWidgets.QMessageBox.critical(self, 'Erro', f'Erro ao executar ffprobe: {err}'))
+            self._info_proc.start()
+        except FileNotFoundError:
+            QtWidgets.QMessageBox.critical(self, 'Erro', 'ffprobe não encontrado (verifique PATH ou caminho configurado).')
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao iniciar ffprobe: {e}')
+
+    def _on_info_finished(self, code, status):
+        try:
+            out = bytes(self._info_proc.readAllStandardOutput()).decode('utf-8', errors='ignore') if hasattr(self, '_info_proc') else ''
+            if code != 0:
+                QtWidgets.QMessageBox.critical(self, 'Erro', f'ffprobe falhou (código {code}).')
+                return
+            data = json.loads(out or '{}')
             info_text = json.dumps(data, indent=2, ensure_ascii=False)
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle('Informações detalhadas do vídeo')
@@ -404,10 +420,12 @@ class FFmpegGuiPyQt6(QWidget):
             v.addWidget(b)
             dlg.setLayout(v)
             dlg.exec()
-        except FileNotFoundError:
-            QtWidgets.QMessageBox.critical(self, 'Erro', 'ffprobe não encontrado (verifique PATH ou caminho configurado).')
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao obter info: {e}')
+        finally:
+            try:
+                self._info_proc.deleteLater()
+            except Exception:
+                pass
+            self._info_proc = None
 
     def on_no_audio_change(self):
         disabled = self.no_audio_chk.isChecked()
@@ -422,13 +440,16 @@ class FFmpegGuiPyQt6(QWidget):
         """Download URL returning raw bytes. Tries requests first, then urllib as fallback."""
         try:
             import requests  # type: ignore
-            resp = requests.get(url, timeout=timeout)
+            resp = requests.get(url, timeout=timeout, verify=True)
             resp.raise_for_status()
             return resp.content
         except Exception:
             # Fallback to urllib
             import urllib.request
-            with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            with urllib.request.urlopen(url, timeout=timeout, context=ctx) as resp:  # nosec B310
                 if resp.status != 200:
                     raise RuntimeError(f"HTTP {resp.status}")
                 return resp.read()
