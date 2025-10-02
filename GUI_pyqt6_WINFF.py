@@ -11,6 +11,7 @@ import webbrowser
 import tempfile
 import zipfile
 import shlex
+import tarfile
 from io import BytesIO
 from functools import partial
 
@@ -144,6 +145,11 @@ class FFmpegGuiPyQt6(QWidget):
         # command display
         layout.addWidget(QLabel('Comando FFmpeg:'))
         self.command_display = QTextEdit(); self.command_display.setReadOnly(True)
+        # cap log length to avoid unbounded growth (drop oldest lines automatically)
+        try:
+            self.command_display.document().setMaximumBlockCount(2000)
+        except Exception:
+            pass
         layout.addWidget(self.command_display)
 
         # buttons
@@ -338,28 +344,26 @@ class FFmpegGuiPyQt6(QWidget):
             text = str(data)
         self._append_log(text)
 
-    def _on_proc_finished(self, code, status):
-        ok = (code == 0)
+    def _finalize_proc(self):
         self.convert_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self._proc = None
+
+    def _on_proc_finished(self, code, status):
+        ok = (code == 0)
+        self._finalize_proc()
         if ok:
             QtWidgets.QMessageBox.information(self, 'Sucesso', 'Vídeo convertido com sucesso!')
         else:
             QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao converter vídeo (código {code}).')
 
     def _on_proc_error(self, err):
-        self.convert_btn.setEnabled(True)
-        self.cancel_btn.setEnabled(False)
-        self._proc = None
+        self._finalize_proc()
         QtWidgets.QMessageBox.critical(self, 'Erro', f'Erro de processo: {err}')
 
     def _append_log(self, msg):
-        prev = self.command_display.toPlainText()
-        if prev:
-            self.command_display.setPlainText(prev + "\n" + msg)
-        else:
-            self.command_display.setPlainText(msg)
+        # Efficient append without rewriting whole buffer
+        self.command_display.append(msg)
 
     def show_about(self):
         QtWidgets.QMessageBox.information(self, 'About', 'Mauricio Menon (+AI)\nhttps://github.com/mauriciomenon\nPyQt6 version of the GUI')
@@ -450,7 +454,7 @@ class FFmpegGuiPyQt6(QWidget):
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
         os.makedirs(base_dir, exist_ok=True)
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
-            zf.extractall(base_dir)
+            self._safe_zip_extract(zf, base_dir)
         # try to find ffmpeg(.exe)
         ffmpeg_path = None
         for root, dirs, files in os.walk(base_dir):
@@ -493,9 +497,8 @@ class FFmpegGuiPyQt6(QWidget):
                         # extrair para ./bin e apontar para bin/ffmpeg
                         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
                         os.makedirs(base_dir, exist_ok=True)
-                        import tarfile
                         with tarfile.open(fileobj=BytesIO(content), mode='r:xz') as tf:
-                            tf.extractall(base_dir)
+                            self._safe_tar_extract(tf, base_dir)
                         # procurar binário
                         ffmpeg_path = None
                         for root, dirs, files in os.walk(base_dir):
@@ -557,6 +560,37 @@ class FFmpegGuiPyQt6(QWidget):
     @QtCore.pyqtSlot(str)
     def show_error_msg(self, msg):
         QtWidgets.QMessageBox.critical(self, 'Erro', msg)
+
+    # ---- security helpers ----
+    def _safe_tar_extract(self, tf: tarfile.TarFile, base_dir: str):
+        base = os.path.realpath(base_dir)
+        for member in tf.getmembers():
+            member_path = os.path.realpath(os.path.join(base, member.name))
+            if not member_path.startswith(base + os.sep) and member_path != base:
+                raise RuntimeError(f"Entrada insegura no tar: {member.name}")
+        tf.extractall(base)
+
+    def _safe_zip_extract(self, zf: zipfile.ZipFile, base_dir: str):
+        base = os.path.realpath(base_dir)
+        for zi in zf.infolist():
+            name = zi.filename
+            # reject absolute paths or drive letters
+            if os.path.isabs(name) or (
+                len(name) > 1 and name[1] == ':'
+            ):
+                raise RuntimeError(f"Entrada insegura no zip (absoluta): {name}")
+            dest = os.path.realpath(os.path.join(base, name))
+            if not dest.startswith(base + os.sep) and dest != base:
+                raise RuntimeError(f"Entrada insegura no zip: {name}")
+        # after validation, extract members
+        for zi in zf.infolist():
+            dest = os.path.realpath(os.path.join(base, zi.filename))
+            if zi.is_dir() or zi.filename.endswith('/'):
+                os.makedirs(dest, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with zf.open(zi, 'r') as src, open(dest, 'wb') as out:
+                out.write(src.read())
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

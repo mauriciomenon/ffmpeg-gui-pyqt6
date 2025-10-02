@@ -284,10 +284,12 @@ class FFmpegGuiTk(tk.Tk):
 		self.cmd_text.insert('1.0', ' '.join(shlex.quote(a) for a in args))
 
 	def _append_log(self, text: str):
-		current = self.cmd_text.get('1.0', 'end-1c')
-		new = (current + '\n' + text) if current else text
-		self.cmd_text.delete('1.0', 'end')
-		self.cmd_text.insert('1.0', new)
+		# Efficiently append to the end without rewriting everything
+		if self.cmd_text.get('1.0', 'end-1c'):
+			self.cmd_text.insert('end', '\n' + text)
+		else:
+			self.cmd_text.insert('end', text)
+		self.cmd_text.see('end')
 
 	def _reader_worker(self):
 		try:
@@ -404,7 +406,7 @@ class FFmpegGuiTk(tk.Tk):
 		base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
 		os.makedirs(base_dir, exist_ok=True)
 		with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
-			zf.extractall(base_dir)
+			self._safe_zip_extract(zf, base_dir)
 		for root, _dirs, files in os.walk(base_dir):
 			for f in files:
 				if f.lower() == ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'):
@@ -445,7 +447,7 @@ class FFmpegGuiTk(tk.Tk):
 					base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
 					os.makedirs(base_dir, exist_ok=True)
 					with tarfile.open(fileobj=BytesIO(content), mode='r:xz') as tf:
-						tf.extractall(base_dir)
+						self._safe_tar_extract(tf, base_dir)
 					ffpath = None
 					for root, _d, files in os.walk(base_dir):
 						for f in files:
@@ -481,6 +483,34 @@ class FFmpegGuiTk(tk.Tk):
 
 		threading.Thread(target=worker, daemon=True).start()
 		self.after(200, poll)
+
+	def _safe_tar_extract(self, tf: tarfile.TarFile, base_dir: str):
+		base = os.path.realpath(base_dir)
+		for member in tf.getmembers():
+			member_path = os.path.realpath(os.path.join(base, member.name))
+			if not member_path.startswith(base + os.sep) and member_path != base:
+				raise RuntimeError(f"Entrada insegura no tar: {member.name}")
+		tf.extractall(base)
+
+	def _safe_zip_extract(self, zf: zipfile.ZipFile, base_dir: str):
+		base = os.path.realpath(base_dir)
+		for zi in zf.infolist():
+			name = zi.filename
+			# reject absolute paths or drive letters on Windows
+			if os.path.isabs(name) or (len(name) > 1 and name[1] == ':'):
+				raise RuntimeError(f"Entrada insegura no zip (absoluta): {name}")
+			dest = os.path.realpath(os.path.join(base, name))
+			if not dest.startswith(base + os.sep) and dest != base:
+				raise RuntimeError(f"Entrada insegura no zip: {name}")
+		# after validation, extract members
+		for zi in zf.infolist():
+			dest = os.path.realpath(os.path.join(base, zi.filename))
+			if zi.is_dir() or zi.filename.endswith('/'):
+				os.makedirs(dest, exist_ok=True)
+				continue
+			os.makedirs(os.path.dirname(dest), exist_ok=True)
+			with zf.open(zi, 'r') as src, open(dest, 'wb') as out:
+				out.write(src.read())
 
 	def install_ffmpeg_via_winget(self):
 		if platform.system() != 'Windows':
