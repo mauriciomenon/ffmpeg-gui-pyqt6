@@ -9,6 +9,10 @@ from tkinter import filedialog, messagebox
 import configparser
 import json
 import platform
+import threading
+import urllib.request
+import webbrowser
+from pathlib import Path
 
 try:
     import ffmpeg as ffmpeg_lib  # optional: ffmpeg-python
@@ -138,11 +142,48 @@ def select_ffmpeg_executable():
             config.write(configfile)
         update_command_display()
 
-def load_config_from_file():
-    cfg = filedialog.askopenfilename(title="Carregar Configuração", filetypes=[("Configurações", "*.ini")])
-    if cfg:
-        load_config(cfg)
-        messagebox.showinfo("Carregar Configuração", "Configuração carregada com sucesso!")
+
+def download_ffmpeg_and_maybe_install():
+    """Download a FFmpeg build to the user's Downloads folder.
+    On Windows offer to try winget install if available and the user agrees.
+    Runs in a background thread to avoid blocking the UI."""
+    def _worker():
+        try:
+            downloads = Path.home() / 'Downloads'
+            downloads.mkdir(parents=True, exist_ok=True)
+            if os.name == 'nt':
+                # Example Windows build (user-provided example)
+                url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip'
+                out_path = downloads / url.split('/')[-1]
+                messagebox.showinfo('Download', f'Baixando FFmpeg para {out_path} ...')
+                urllib.request.urlretrieve(url, out_path)
+                messagebox.showinfo('Download', f'Arquivo salvo em {out_path}')
+
+                # Ask user if they want to attempt installation via winget
+                if messagebox.askyesno('Instalar', 'Deseja tentar instalar via winget (Windows)?'):
+                    try:
+                        # Check winget availability
+                        res = subprocess.run(['winget', '--version'], capture_output=True, text=True)
+                        if res.returncode == 0:
+                            # Try a generic winget install for ffmpeg
+                            install_cmd = ['winget', 'install', 'ffmpeg', '-e']
+                            proc = subprocess.run(install_cmd, capture_output=True, text=True)
+                            if proc.returncode == 0:
+                                messagebox.showinfo('Instalação', 'FFmpeg instalado via winget com sucesso.')
+                            else:
+                                messagebox.showwarning('Instalação', f'Falha na instalação via winget. Saída:\n{proc.stdout}\n{proc.stderr}')
+                        else:
+                            messagebox.showwarning('winget', 'winget não está disponível neste sistema.')
+                    except FileNotFoundError:
+                        messagebox.showwarning('winget', 'winget não encontrado.')
+            else:
+                # Non-Windows: open releases page in browser so user can choose
+                webbrowser.open('https://github.com/BtbN/FFmpeg-Builds/releases')
+                messagebox.showinfo('Download', 'Página de releases aberta no navegador. Faça o download manualmente.')
+        except Exception as e:
+            messagebox.showerror('Erro', f'Falha ao baixar/instalar FFmpeg: {e}')
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 # Conversão e comando ffmpeg
 
@@ -174,23 +215,29 @@ def convert_video():
         messagebox.showerror("Erro", f"O arquivo '{output_file}' já existe e não pode ser sobrescrito.")
         return
 
+    # Build command. If no audio is selected, add -an and skip audio options
     command = f'"{ffmpeg_path}" -y -i "{input_file}"'
     if video_bitrate:
         command += f" -b:v {video_bitrate}"
-    if audio_bitrate:
-        command += f" -b:a {audio_bitrate}"
+    if not no_audio_var.get():
+        if audio_bitrate:
+            command += f" -b:a {audio_bitrate}"
     if resolution != "original":
         command += f" -s {resolution}"
     if frame_rate:
         command += f" -r {frame_rate}"
-    if audio_sample_rate:
-        command += f" -ar {audio_sample_rate}"
-    if audio_channels:
-        command += f" -ac {audio_channels}"
+    if not no_audio_var.get():
+        if audio_sample_rate:
+            command += f" -ar {audio_sample_rate}"
+        if audio_channels:
+            command += f" -ac {audio_channels}"
     if video_codec != "auto":
         command += f" -vcodec {video_codec}"
-    if audio_codec != "auto":
-        command += f" -acodec {audio_codec}"
+    if not no_audio_var.get():
+        if audio_codec != "auto":
+            command += f" -acodec {audio_codec}"
+    if no_audio_var.get():
+        command += ' -an'
 
     command += f" \"{output_file}\""
 
@@ -327,20 +374,26 @@ def update_command_display(event=None):
     command = f'"{ffmpeg_path}" -y -i "{input_file}"' if input_file else ''
     if video_bitrate:
         command += f" -b:v {video_bitrate}"
-    if audio_bitrate:
-        command += f" -b:a {audio_bitrate}"
+    if not no_audio_var.get():
+        if audio_bitrate:
+            command += f" -b:a {audio_bitrate}"
     if resolution != "original":
         command += f" -s {resolution}"
     if frame_rate:
         command += f" -r {frame_rate}"
-    if audio_sample_rate:
-        command += f" -ar {audio_sample_rate}"
-    if audio_channels:
-        command += f" -ac {audio_channels}"
+    if not no_audio_var.get():
+        if audio_sample_rate:
+            command += f" -ar {audio_sample_rate}"
+        if audio_channels:
+            command += f" -ac {audio_channels}"
     if video_codec != "auto":
         command += f" -vcodec {video_codec}"
-    if audio_codec != "auto":
-        command += f" -acodec {audio_codec}"
+    if not no_audio_var.get():
+        if audio_codec != "auto":
+            command += f" -acodec {audio_codec}"
+    if no_audio_var.get():
+        command += ' -an'
+
     if output_file:
         command += f" \"{output_file}\""
 
@@ -456,7 +509,25 @@ tk.Label(root, text="Caminho do Executável FFmpeg:").grid(row=13, column=0, pad
 ffmpeg_path_entry = tk.Entry(root, width=70)
 ffmpeg_path_entry.grid(row=13, column=1, padx=10, pady=5)
 ffmpeg_path_entry.bind("<KeyRelease>", lambda event: update_command_display())
- tk.Button(root, text="Procurar", command=select_ffmpeg_executable).grid(row=13, column=2, padx=10, pady=5)
+procurar_ffmpeg_btn = tk.Button(root, text="Procurar", command=select_ffmpeg_executable)
+procurar_ffmpeg_btn.grid(row=13, column=2, padx=10, pady=5)
+
+# Button to download FFmpeg
+download_ffmpeg_btn = tk.Button(root, text="Baixar FFmpeg (Downloads)", command=download_ffmpeg_and_maybe_install)
+download_ffmpeg_btn.grid(row=13, column=0, padx=10, pady=5, sticky='w')
+
+# Checkbox: arquivo sem áudio (desabilita campos de áudio e adiciona -an)
+no_audio_var = tk.BooleanVar()
+def _on_no_audio_toggle():
+    state = tk.DISABLED if no_audio_var.get() else tk.NORMAL
+    audio_bitrate_entry.config(state=state)
+    audio_sample_rate_entry.config(state=state)
+    audio_channels_menu.config(state=state)
+    audio_codec_menu.config(state=state)
+    update_command_display()
+
+no_audio_check = tk.Checkbutton(root, text="Arquivo sem áudio (remover áudio)", variable=no_audio_var, command=_on_no_audio_toggle)
+no_audio_check.grid(row=14, column=2, padx=10, pady=5)
 
 # Command display
 tk.Label(root, text="Comando FFmpeg:").grid(row=14, column=0, padx=10, pady=5, sticky="w")
