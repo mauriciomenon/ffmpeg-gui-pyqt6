@@ -7,6 +7,14 @@ on:
       - '**/*.py'
       - '.github/workflows/**'
       - 'requirements.txt'
+  push:
+    branches:
+      - master
+      - ci-build-and-no-audio-asf
+    paths:
+      - '**/*.py'
+      - '.github/workflows/**'
+      - 'requirements.txt'
   workflow_dispatch: {}
 
 jobs:
@@ -52,9 +60,15 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cp dist/WINFF-GUI-PyQt6.exe artifacts/
             cp dist/WINFF-GUI-Tkinter.exe artifacts/
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            # Package .app bundles as zips
+            cd dist
+            zip -r ../artifacts/WINFF-GUI-PyQt6-macos.app.zip "WINFF-GUI-PyQt6.app"
+            zip -r ../artifacts/WINFF-GUI-Tkinter-macos.app.zip "WINFF-GUI-Tkinter.app"
+            cd -
           else
-            cp dist/WINFF-GUI-PyQt6 artifacts/
-            cp dist/WINFF-GUI-Tkinter artifacts/
+            # Fallback for other OSes (not used here)
+            cp -r dist/* artifacts/
           fi
 
       - name: Upload artifacts
