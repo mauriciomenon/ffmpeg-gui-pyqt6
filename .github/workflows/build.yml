@@ -1,20 +1,7 @@
 name: build-binaries
 
 on:
-  pull_request:
-    branches: [ master ]
-    paths:
-      - '**/*.py'
-      - '.github/workflows/**'
-      - 'requirements.txt'
-  push:
-    branches:
-      - master
-      - ci-build-and-no-audio-asf
-    paths:
-      - '**/*.py'
-      - '.github/workflows/**'
-      - 'requirements.txt'
+  # Disable automatic triggers to avoid unexpected costs; run manually from the Actions tab
   workflow_dispatch: {}
 
 jobs:

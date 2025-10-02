@@ -1,6 +1,7 @@
 name: release
 
 on:
+  # Release builds run on tag pushes only; tag creation is a deliberate action.
   push:
     tags:
       - 'v*'
