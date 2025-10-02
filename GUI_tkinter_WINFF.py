@@ -13,11 +13,13 @@ import zipfile
 from io import BytesIO
 import subprocess
 import configparser
+import tarfile
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
+import importlib
 try:
-	import requests
+	requests = importlib.import_module('requests')
 except Exception:
 	requests = None
 
@@ -138,7 +140,15 @@ class FFmpegGuiTk(tk.Tk):
 		ttk.Button(btns, text='Opções Padrão', command=self.set_default_options).pack(side='left')
 		ttk.Button(btns, text='Carregar Configuração', command=self.load_config).pack(side='left', padx=6)
 		ttk.Button(btns, text='Salvar Configuração', command=self.save_config).pack(side='left')
-		ttk.Button(btns, text='Converter', command=self.convert_video).pack(side='right')
+		self.convert_btn = ttk.Button(btns, text='Converter', command=self.convert_video)
+		self.convert_btn.pack(side='right')
+		self.cancel_btn = ttk.Button(btns, text='Cancelar', command=self.cancel_convert, state='disabled')
+		self.cancel_btn.pack(side='right', padx=6)
+
+		# runtime process state
+		self._proc = None
+		self._log_q = queue.Queue()
+		self._reader_thread = None
 
 	# -------------------- Actions --------------------
 	def select_file(self):
@@ -273,16 +283,67 @@ class FFmpegGuiTk(tk.Tk):
 			return
 		self.cmd_text.insert('1.0', ' '.join(shlex.quote(a) for a in args))
 
+	def _append_log(self, text: str):
+		current = self.cmd_text.get('1.0', 'end-1c')
+		new = (current + '\n' + text) if current else text
+		self.cmd_text.delete('1.0', 'end')
+		self.cmd_text.insert('1.0', new)
+
+	def _reader_worker(self):
+		try:
+			assert self._proc is not None
+			for line in self._proc.stdout:
+				self._log_q.put(line.rstrip())
+		except Exception as e:
+			self._log_q.put(f"[erro leitor]: {e}")
+
+	def _poll_logs(self):
+		try:
+			while True:
+				line = self._log_q.get_nowait()
+				self._append_log(line)
+		except queue.Empty:
+			pass
+		# if process still alive, reschedule; else finalize
+		if self._proc is not None and self._proc.poll() is None:
+			self.after(200, self._poll_logs)
+		else:
+			code = None if self._proc is None else self._proc.returncode
+			self._proc = None
+			self.convert_btn.configure(state='normal')
+			self.cancel_btn.configure(state='disabled')
+			if code == 0:
+				messagebox.showinfo('Sucesso', 'Vídeo convertido com sucesso!')
+			elif code is not None:
+				messagebox.showerror('Erro', f'Falha ao converter vídeo (código {code}).')
+
+	def cancel_convert(self):
+		if self._proc is not None and self._proc.poll() is None:
+			self._append_log('Cancelando conversão...')
+			try:
+				self._proc.terminate()
+			except Exception:
+				pass
+
 	def convert_video(self):
+		if self._proc is not None and self._proc.poll() is None:
+			messagebox.showwarning('Em execução', 'Uma conversão já está em andamento.')
+			return
 		args = self.build_command_list()
 		if not args:
 			messagebox.showwarning('Erro', 'Preencha os campos necessários')
 			return
+		self._append_log('Iniciando conversão...')
 		try:
-			subprocess.run(args, check=True)
-			messagebox.showinfo('Sucesso', 'Vídeo convertido com sucesso!')
-		except subprocess.CalledProcessError as e:
-			messagebox.showerror('Erro', f'Falha ao converter vídeo.\nErro: {e}')
+			self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+			self._reader_thread = threading.Thread(target=self._reader_worker, daemon=True)
+			self._reader_thread.start()
+			self.convert_btn.configure(state='disabled')
+			self.cancel_btn.configure(state='normal')
+			self.after(200, self._poll_logs)
+		except Exception as e:
+			self._proc = None
+			messagebox.showerror('Erro', f'Falha ao iniciar ffmpeg: {e}')
 
 	# -------------------- Info/About --------------------
 	def show_about(self):
@@ -325,17 +386,18 @@ class FFmpegGuiTk(tk.Tk):
 	# -------------------- Download/Install FFmpeg --------------------
 	def _get_latest_ffmpeg_windows_zip_url(self) -> str:
 		# GitHub API (BtbN/FFmpeg-Builds) + fallback
-		if requests is not None:
-			try:
-				r = requests.get('https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest', timeout=10)
-				if r.ok:
-					data = r.json()
+		try:
+			import urllib.request, json as _json
+			req = urllib.request.Request('https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest', headers={'User-Agent': 'ffmpeg-gui'})
+			with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
+				if resp.status == 200:
+					data = _json.loads(resp.read().decode('utf-8'))
 					for asset in data.get('assets', []):
 						name = asset.get('name','')
 						if name.endswith('win64-gpl.zip'):
 							return asset.get('browser_download_url')
-			except Exception:
-				pass
+		except Exception:
+			pass
 		return 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip'
 
 	def _extract_ffmpeg_zip(self, zip_bytes: bytes) -> str | None:
@@ -349,42 +411,73 @@ class FFmpegGuiTk(tk.Tk):
 					return os.path.join(root, f)
 		return None
 
+	def _http_get(self, url: str, timeout: int = 60) -> bytes:
+		"""Download com requests (se disponível) e fallback para urllib."""
+		if requests is not None:
+			try:
+				r = requests.get(url, timeout=timeout)
+				r.raise_for_status()
+				return r.content
+			except Exception:
+				pass
+		import urllib.request
+		with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
+			return resp.read()
+
 	def download_ffmpeg_and_maybe_install(self):
-		if platform.system() != 'Windows':
-			webbrowser.open('https://github.com/BtbN/FFmpeg-Builds/releases')
-			messagebox.showinfo('FFmpeg', 'Em sistemas não Windows, abrimos a página de releases para download manual.')
-			return
-
-		if requests is None:
-			messagebox.showerror('Erro', 'O pacote requests não está instalado.')
-			return
-
 		q = queue.Queue()
 
 		def worker():
 			try:
-				url = self._get_latest_ffmpeg_windows_zip_url()
-				r = requests.get(url, timeout=30)
-				r.raise_for_status()
-				ff = self._extract_ffmpeg_zip(r.content)
-				if ff:
-					q.put(('ok', ff))
+				sysname = platform.system()
+				if sysname == 'Windows':
+					url = self._get_latest_ffmpeg_windows_zip_url()
+					content = self._http_get(url, timeout=60)
+					ff = self._extract_ffmpeg_zip(content)
+					if ff:
+						q.put(('ok', ff, 'FFmpeg baixado e extraído com sucesso.'))
+					else:
+						q.put(('err', None, 'Não foi possível localizar o executável ffmpeg após extração.'))
+				elif sysname == 'Linux':
+					arch = platform.machine().lower()
+					url = 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz' if arch in ('aarch64','arm64') else 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz'
+					content = self._http_get(url, timeout=60)
+					base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
+					os.makedirs(base_dir, exist_ok=True)
+					with tarfile.open(fileobj=BytesIO(content), mode='r:xz') as tf:
+						tf.extractall(base_dir)
+					ffpath = None
+					for root, _d, files in os.walk(base_dir):
+						for f in files:
+							if f == 'ffmpeg':
+								ffpath = os.path.join(root, f)
+								break
+						if ffpath:
+							break
+					if ffpath:
+						q.put(('ok', ffpath, 'FFmpeg baixado e pronto (build estático).'))
+					else:
+						q.put(('err', None, 'Não foi possível localizar o ffmpeg extraído.'))
 				else:
-					q.put(('err', 'Não foi possível localizar o executável ffmpeg após extração.'))
+					webbrowser.open('https://formulae.brew.sh/formula/ffmpeg')
+					q.put(('info', None, 'No macOS, instale via Homebrew: brew install ffmpeg'))
 			except Exception as e:
-				q.put(('err', f'Falha no download: {e}'))
+				q.put(('err', None, f'Falha no download: {e}'))
 
 		def poll():
 			try:
-				typ, payload = q.get_nowait()
+				typ, path, msg = q.get_nowait()
 			except queue.Empty:
 				self.after(200, poll)
 				return
 			if typ == 'ok':
-				self.ffmpeg_path_var.set(payload)
-				messagebox.showinfo('Info', 'FFmpeg baixado e extraído com sucesso.')
+				if path:
+					self.ffmpeg_path_var.set(path)
+				messagebox.showinfo('Info', msg)
+			elif typ == 'info':
+				messagebox.showinfo('Info', msg)
 			else:
-				messagebox.showerror('Erro', payload)
+				messagebox.showerror('Erro', msg)
 
 		threading.Thread(target=worker, daemon=True).start()
 		self.after(200, poll)
