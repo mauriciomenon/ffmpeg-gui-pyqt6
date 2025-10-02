@@ -10,6 +10,8 @@ import threading
 import urllib.request
 import webbrowser
 from pathlib import Path
+import zipfile
+import shutil
 
 from PyQt6 import QtWidgets, QtCore
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox, QFileDialog, QCheckBox, QHBoxLayout, QVBoxLayout
@@ -177,6 +179,44 @@ class FFmpegGuiPyQt6(QWidget):
         if file:
             self.ffmpeg_path.setText(file)
 
+    def _extract_ffmpeg_zip(self, zip_path, target_bin_dir):
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                temp_dir = target_bin_dir.parent / ('ffmpeg_tmp')
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                zf.extractall(path=temp_dir)
+
+                exe_name = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+                found = None
+                for root, dirs, files in os.walk(temp_dir):
+                    if exe_name in files:
+                        found = Path(root) / exe_name
+                        break
+                if not found:
+                    for root, dirs, files in os.walk(temp_dir):
+                        for d in dirs:
+                            p = Path(root) / d / 'bin' / exe_name
+                            if p.exists():
+                                found = p
+                                break
+                        if found:
+                            break
+                if found:
+                    target_bin_dir.mkdir(parents=True, exist_ok=True)
+                    target_path = target_bin_dir / exe_name
+                    shutil.copy2(found, target_path)
+                    if os.name != 'nt':
+                        target_path.chmod(0o755)
+                    shutil.rmtree(temp_dir)
+                    return str(target_path)
+                else:
+                    shutil.rmtree(temp_dir)
+                    return None
+        except Exception:
+            return None
+
     def download_ffmpeg_and_maybe_install(self):
         def _worker():
             try:
@@ -187,9 +227,14 @@ class FFmpegGuiPyQt6(QWidget):
                     out_path = downloads / url.split('/')[-1]
                     QtWidgets.QMessageBox.information(self, 'Download', f'Baixando FFmpeg para {out_path} ...')
                     urllib.request.urlretrieve(url, out_path)
-                    QtWidgets.QMessageBox.information(self, 'Download', f'Arquivo salvo em {out_path}')
+                    target_bin = Path(os.path.dirname(os.path.abspath(__file__))) / 'bin'
+                    extracted = self._extract_ffmpeg_zip(out_path, target_bin)
+                    if extracted:
+                        QtWidgets.QMessageBox.information(self, 'Download', f'FFmpeg extraído para {extracted}. Atualizando caminho...')
+                        self.ffmpeg_path.setText(extracted)
+                    else:
+                        QtWidgets.QMessageBox.warning(self, 'Download', f'Não foi possível extrair o executável FFmpeg automaticamente. O arquivo está em {out_path}')
 
-                    # Ask user if they want to attempt installation via winget
                     res = subprocess.run(['winget', '--version'], capture_output=True, text=True)
                     if res.returncode == 0:
                         ans = QtWidgets.QMessageBox.question(self, 'Instalar', 'Deseja tentar instalar via winget (Windows)?')

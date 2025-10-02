@@ -13,6 +13,8 @@ import threading
 import urllib.request
 import webbrowser
 from pathlib import Path
+import zipfile
+import shutil
 
 try:
     import ffmpeg as ffmpeg_lib  # optional: ffmpeg-python
@@ -44,6 +46,18 @@ else:
 def load_config(file_name):
     config.read(file_name)
     apply_saved_config()
+
+def load_config_from_file():
+    path = filedialog.askopenfilename(title="Carregar Configuração", filetypes=[("Arquivos INI", "*.ini")])
+    if not path:
+        return
+    try:
+        config.read(path)
+        apply_saved_config()
+        messagebox.showinfo('Configuração', f'Configuração carregada de {path}')
+    except Exception as e:
+        messagebox.showerror('Erro', f'Falha ao carregar configuração: {e}')
+
 
 def save_config():
     config_file_path = filedialog.asksaveasfilename(initialdir=os.getcwd(), title="Salvar Configuração", defaultextension=".ini",
@@ -143,29 +157,84 @@ def select_ffmpeg_executable():
         update_command_display()
 
 
+def _extract_ffmpeg_zip(zip_path, target_bin_dir):
+    """Extract ffmpeg binary from the downloaded zip into target_bin_dir.
+    Returns path to extracted ffmpeg executable if found, else None."""
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            # Extract all to a temporary folder and search for ffmpeg/ffmpeg.exe
+            temp_dir = target_bin_dir.parent / ("ffmpeg_tmp")
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            zf.extractall(path=temp_dir)
+
+            # Walk extracted tree and find ffmpeg executable
+            exe_name = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+            found = None
+            for root, dirs, files in os.walk(temp_dir):
+                if exe_name in files:
+                    found = Path(root) / exe_name
+                    break
+            if not found:
+                # Try common structure 'ffmpeg-*/bin/ffmpeg'
+                for root, dirs, files in os.walk(temp_dir):
+                    for d in dirs:
+                        p = Path(root) / d / 'bin' / exe_name
+                        if p.exists():
+                            found = p
+                            break
+                    if found:
+                        break
+            if found:
+                target_bin_dir.mkdir(parents=True, exist_ok=True)
+                target_path = target_bin_dir / exe_name
+                shutil.copy2(found, target_path)
+                # ensure executable bit on non-Windows
+                if os.name != 'nt':
+                    target_path.chmod(0o755)
+                # cleanup temp
+                shutil.rmtree(temp_dir)
+                return str(target_path)
+            else:
+                shutil.rmtree(temp_dir)
+                return None
+    except Exception:
+        return None
+
+
 def download_ffmpeg_and_maybe_install():
     """Download a FFmpeg build to the user's Downloads folder.
-    On Windows offer to try winget install if available and the user agrees.
-    Runs in a background thread to avoid blocking the UI."""
+    On Windows: download zip, extract ffmpeg into ./bin and optionally try winget install.
+    On non-Windows: open releases page in browser. Runs in background thread."""
     def _worker():
         try:
             downloads = Path.home() / 'Downloads'
             downloads.mkdir(parents=True, exist_ok=True)
             if os.name == 'nt':
-                # Example Windows build (user-provided example)
+                # Example Windows build URL (may be updated if releases change)
                 url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip'
                 out_path = downloads / url.split('/')[-1]
                 messagebox.showinfo('Download', f'Baixando FFmpeg para {out_path} ...')
                 urllib.request.urlretrieve(url, out_path)
-                messagebox.showinfo('Download', f'Arquivo salvo em {out_path}')
+                # Extract into repo's bin/ folder
+                target_bin = Path(os.path.dirname(os.path.abspath(__file__))) / 'bin'
+                extracted = _extract_ffmpeg_zip(out_path, target_bin)
+                if extracted:
+                    messagebox.showinfo('Download', f'FFmpeg extraído para {extracted}. Atualizando caminho...')
+                    ffmpeg_path_entry.delete(0, tk.END)
+                    ffmpeg_path_entry.insert(0, extracted)
+                    config['DEFAULT']['ffmpeg_path'] = extracted
+                    with open(config_file, 'w') as configfile:
+                        config.write(configfile)
+                else:
+                    messagebox.showwarning('Download', f'Não foi possível extrair o executável FFmpeg automaticamente. O arquivo está em {out_path}')
 
                 # Ask user if they want to attempt installation via winget
                 if messagebox.askyesno('Instalar', 'Deseja tentar instalar via winget (Windows)?'):
                     try:
-                        # Check winget availability
                         res = subprocess.run(['winget', '--version'], capture_output=True, text=True)
                         if res.returncode == 0:
-                            # Try a generic winget install for ffmpeg
                             install_cmd = ['winget', 'install', 'ffmpeg', '-e']
                             proc = subprocess.run(install_cmd, capture_output=True, text=True)
                             if proc.returncode == 0:
