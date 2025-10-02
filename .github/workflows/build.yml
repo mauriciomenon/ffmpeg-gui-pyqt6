@@ -1,0 +1,63 @@
+name: build-binaries
+
+on:
+  pull_request:
+    branches: [ master ]
+    paths:
+      - '**/*.py'
+      - '.github/workflows/**'
+      - 'requirements.txt'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: Build PyInstaller binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-13]
+        python-version: ['3.11']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install PyQt6; fi
+          pip install pyinstaller
+
+      - name: Build PyQt6 app
+        shell: bash
+        run: |
+          pyinstaller --name WINFF-GUI-PyQt6 --noconfirm --onefile --windowed GUI_pyqt6_WINFF.py
+
+      - name: Build Tkinter app
+        shell: bash
+        run: |
+          pyinstaller --name WINFF-GUI-Tkinter --noconfirm --onefile --windowed GUI_tkinter_WINFF.py
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp dist/WINFF-GUI-PyQt6.exe artifacts/
+            cp dist/WINFF-GUI-Tkinter.exe artifacts/
+          else
+            cp dist/WINFF-GUI-PyQt6 artifacts/
+            cp dist/WINFF-GUI-Tkinter artifacts/
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-binaries
+          path: artifacts/*
