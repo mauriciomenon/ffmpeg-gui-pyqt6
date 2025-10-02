@@ -71,12 +71,12 @@ jobs:
       - name: Build PyQt6 app
         shell: bash
         run: |
-          pyinstaller --name WINFF-GUI-PyQt6 --noconfirm --onefile --windowed GUI_pyqt6_WINFF.py
+          pyinstaller --name ffmpeg-gui-pyqt6 --noconfirm --onefile --windowed GUI_pyqt6_WINFF.py
 
       - name: Build Tkinter app
         shell: bash
         run: |
-          pyinstaller --name WINFF-GUI-Tkinter --noconfirm --onefile --windowed GUI_tkinter_WINFF.py
+          pyinstaller --name ffmpeg-gui-tkinter --noconfirm --onefile --windowed GUI_tkinter_WINFF.py
 
       - name: Package artifacts
         shell: bash
@@ -84,16 +84,16 @@ jobs:
           mkdir -p artifacts
           arch_lc=$(echo "${{ runner.arch }}" | tr '[:upper:]' '[:lower:]')
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp dist/WINFF-GUI-PyQt6.exe "artifacts/WINFF-GUI-PyQt6-win-${arch_lc}.exe"
-            cp dist/WINFF-GUI-Tkinter.exe "artifacts/WINFF-GUI-Tkinter-win-${arch_lc}.exe"
+            cp dist/ffmpeg-gui-pyqt6.exe "artifacts/ffmpeg-gui-pyqt6-win-${arch_lc}.exe"
+            cp dist/ffmpeg-gui-tkinter.exe "artifacts/ffmpeg-gui-tkinter-win-${arch_lc}.exe"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             cd dist
-            zip -r "../artifacts/WINFF-GUI-PyQt6-macos-${arch_lc}.app.zip" "WINFF-GUI-PyQt6.app"
-            zip -r "../artifacts/WINFF-GUI-Tkinter-macos-${arch_lc}.app.zip" "WINFF-GUI-Tkinter.app"
+            zip -r "../artifacts/ffmpeg-gui-pyqt6-macos-${arch_lc}.app.zip" "ffmpeg-gui-pyqt6.app"
+            zip -r "../artifacts/ffmpeg-gui-tkinter-macos-${arch_lc}.app.zip" "ffmpeg-gui-tkinter.app"
             cd -
           else
-            cp dist/WINFF-GUI-PyQt6 "artifacts/WINFF-GUI-PyQt6-linux-${arch_lc}"
-            cp dist/WINFF-GUI-Tkinter "artifacts/WINFF-GUI-Tkinter-linux-${arch_lc}"
+            cp dist/ffmpeg-gui-pyqt6 "artifacts/ffmpeg-gui-pyqt6-linux-${arch_lc}"
+            cp dist/ffmpeg-gui-tkinter "artifacts/ffmpeg-gui-tkinter-linux-${arch_lc}"
           fi
 
       - name: Upload artifacts
@@ -145,12 +145,12 @@ jobs:
       - name: Build PyQt6 app (Debian)
         shell: bash
         run: |
-          pyinstaller --name WINFF-GUI-PyQt6 --noconfirm --onefile --windowed GUI_pyqt6_WINFF.py
+          pyinstaller --name ffmpeg-gui-pyqt6 --noconfirm --onefile --windowed GUI_pyqt6_WINFF.py
 
       - name: Build Tkinter app (Debian)
         shell: bash
         run: |
-          pyinstaller --name WINFF-GUI-Tkinter --noconfirm --onefile --windowed GUI_tkinter_WINFF.py
+          pyinstaller --name ffmpeg-gui-tkinter --noconfirm --onefile --windowed GUI_tkinter_WINFF.py
 
       - name: Package artifacts (Debian)
         shell: bash
@@ -158,12 +158,12 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts pkg
           # Copy raw binaries
-          cp dist/WINFF-GUI-PyQt6 artifacts/WINFF-GUI-PyQt6-debian-x64
-          cp dist/WINFF-GUI-Tkinter artifacts/WINFF-GUI-Tkinter-debian-x64
+          cp dist/ffmpeg-gui-pyqt6 artifacts/ffmpeg-gui-pyqt6-debian-x64
+          cp dist/ffmpeg-gui-tkinter artifacts/ffmpeg-gui-tkinter-debian-x64
           # Build simple .deb packages (version from CI run number)
           VER="${GITHUB_REF_NAME:-v0.0.0}"
           VER_DEB="${VER#v}"
-          for app in WINFF-GUI-PyQt6 WINFF-GUI-Tkinter; do
+          for app in ffmpeg-gui-pyqt6 ffmpeg-gui-tkinter; do
             pkgname=$(echo "$app" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
             pkgdir="pkg/${pkgname}_${VER_DEB}_amd64"
             mkdir -p "$pkgdir/DEBIAN" "$pkgdir/usr/local/bin"
