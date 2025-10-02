@@ -10,6 +10,7 @@ import threading
 import webbrowser
 import tempfile
 import zipfile
+import shlex
 from io import BytesIO
 from functools import partial
 
@@ -34,10 +35,13 @@ class FFmpegGuiPyQt6(QWidget):
         info_btn.clicked.connect(self.show_video_info)
         dl_btn = QPushButton('Baixar FFmpeg')
         dl_btn.clicked.connect(self.download_ffmpeg_and_maybe_install)
+        winget_btn = QPushButton('Instalar FFmpeg (winget)')
+        winget_btn.clicked.connect(self.install_ffmpeg_via_winget)
         top_layout.addWidget(about_btn)
         top_layout.addStretch()
         top_layout.addWidget(info_btn)
         top_layout.addWidget(dl_btn)
+        top_layout.addWidget(winget_btn)
         layout.addLayout(top_layout)
 
         # input file
@@ -244,7 +248,7 @@ class FFmpegGuiPyQt6(QWidget):
         with open(file, 'w') as f:
             cp.write(f)
 
-    def build_command(self):
+    def build_command_list(self):
         inp = self.input_edit.text()
         fmt = self.format_combo.currentText()
         video_bitrate = self.video_bitrate.text()
@@ -263,40 +267,45 @@ class FFmpegGuiPyQt6(QWidget):
             out_dir = self.output_edit.text()
         output_file = os.path.join(out_dir, os.path.splitext(os.path.basename(inp))[0] + '.' + fmt) if inp else ''
 
-        cmd = f'"{ffmpeg}" -y -i "{inp}"' if inp else ''
+        if not inp:
+            return []
+        args = [ffmpeg, '-y', '-i', inp]
         if video_bitrate:
-            cmd += f' -b:v {video_bitrate}'
+            args += ['-b:v', video_bitrate]
         if self.no_audio_chk.isChecked():
-            cmd += ' -an'
+            args += ['-an']
         elif audio_bitrate:
-            cmd += f' -b:a {audio_bitrate}'
+            args += ['-b:a', audio_bitrate]
         if resolution != 'original':
-            cmd += f' -s {resolution}'
+            args += ['-s', resolution]
         if frame_rate:
-            cmd += f' -r {frame_rate}'
+            args += ['-r', frame_rate]
         if not self.no_audio_chk.isChecked() and audio_sample_rate:
-            cmd += f' -ar {audio_sample_rate}'
+            args += ['-ar', audio_sample_rate]
         if not self.no_audio_chk.isChecked() and audio_channels:
-            cmd += f' -ac {audio_channels}'
+            args += ['-ac', audio_channels]
         if video_codec != 'auto':
-            cmd += f' -vcodec {video_codec}'
+            args += ['-vcodec', video_codec]
         if not self.no_audio_chk.isChecked() and audio_codec != 'auto':
-            cmd += f' -acodec {audio_codec}'
+            args += ['-acodec', audio_codec]
         if output_file:
-            cmd += f' "{output_file}"'
-        return cmd
+            args += [output_file]
+        return args
 
     def update_command_display(self):
-        cmd = self.build_command()
-        self.command_display.setPlainText(cmd)
+        args = self.build_command_list()
+        if not args:
+            self.command_display.setPlainText('')
+            return
+        self.command_display.setPlainText(' '.join(shlex.quote(a) for a in args))
 
     def convert_video(self):
-        cmd = self.build_command()
-        if not cmd:
+        args = self.build_command_list()
+        if not args:
             QtWidgets.QMessageBox.warning(self, 'Erro', 'Preencha os campos necessários')
             return
         try:
-            subprocess.run(cmd, shell=True, check=True)
+            subprocess.run(args, check=True)
             QtWidgets.QMessageBox.information(self, 'Sucesso', 'Vídeo convertido com sucesso!')
         except subprocess.CalledProcessError as e:
             QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao converter vídeo.\nErro: {e}')
@@ -309,7 +318,19 @@ class FFmpegGuiPyQt6(QWidget):
         if not inp:
             QtWidgets.QMessageBox.warning(self, 'Atenção', 'Nenhum arquivo selecionado')
             return
-        ffprobe = os.path.join(os.path.dirname(self.ffmpeg_path.text()), 'ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+        # Resolve ffprobe path: if ffmpeg_path is a directory or a full path, try alongside; otherwise fall back to PATH
+        configured = self.ffmpeg_path.text().strip()
+        ffprobe_name = 'ffprobe.exe' if os.name == 'nt' else 'ffprobe'
+        candidate = None
+        if configured and os.path.isabs(configured):
+            base = configured
+            if os.path.isdir(base):
+                candidate = os.path.join(base, ffprobe_name)
+            else:
+                candidate = os.path.join(os.path.dirname(base), ffprobe_name)
+        if not candidate or not os.path.exists(candidate):
+            candidate = ffprobe_name  # rely on PATH
+        ffprobe = candidate
         if not os.path.exists(ffprobe):
             QtWidgets.QMessageBox.critical(self, 'Erro', 'ffprobe não encontrado no caminho do ffmpeg')
             return
@@ -392,23 +413,41 @@ class FFmpegGuiPyQt6(QWidget):
                 ff = self._extract_ffmpeg_zip(r.content)
                 if ff:
                     # Update UI on main thread
-                    QtCore.QMetaObject.invokeMethod(
-                        self.ffmpeg_path, 'setText', QtCore.Qt.ConnectionType.QueuedConnection, QtCore.Q_ARG(str, ff)
-                    )
-                    QtCore.QMetaObject.invokeMethod(
-                        self, 'show_info_msg', QtCore.Qt.ConnectionType.QueuedConnection,
-                        QtCore.Q_ARG(str, 'FFmpeg baixado e extraído com sucesso.')
-                    )
+                    QtCore.QTimer.singleShot(0, lambda: self.ffmpeg_path.setText(ff))
+                    QtCore.QTimer.singleShot(0, lambda: self.show_info_msg('FFmpeg baixado e extraído com sucesso.'))
                 else:
-                    QtCore.QMetaObject.invokeMethod(
-                        self, 'show_error_msg', QtCore.Qt.ConnectionType.QueuedConnection,
-                        QtCore.Q_ARG(str, 'Não foi possível localizar o executável ffmpeg após extração.')
-                    )
+                    QtCore.QTimer.singleShot(0, lambda: self.show_error_msg('Não foi possível localizar o executável ffmpeg após extração.'))
             except Exception as e:
-                QtCore.QMetaObject.invokeMethod(
-                    self, 'show_error_msg', QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, f'Falha no download: {e}')
-                )
+                QtCore.QTimer.singleShot(0, lambda: self.show_error_msg(f'Falha no download: {e}'))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def install_ffmpeg_via_winget(self):
+        if platform.system() != 'Windows':
+            self.show_error_msg('Instalação via winget só está disponível no Windows.')
+            return
+
+        def worker():
+            try:
+                # Try common ids: Gyan.FFmpeg, then FFmpeg.FFmpeg
+                cmds = [
+                    ['winget', 'install', '-e', '--id', 'Gyan.FFmpeg'],
+                    ['winget', 'install', '-e', '--id', 'FFmpeg.FFmpeg']
+                ]
+                ok = False
+                for c in cmds:
+                    p = subprocess.run(c, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    if p.returncode == 0:
+                        ok = True
+                        break
+                if ok:
+                    # After install, assume ffmpeg is on PATH
+                    QtCore.QTimer.singleShot(0, lambda: self.ffmpeg_path.setText('ffmpeg'))
+                    QtCore.QTimer.singleShot(0, lambda: self.show_info_msg('FFmpeg instalado via winget.'))
+                else:
+                    QtCore.QTimer.singleShot(0, lambda: self.show_error_msg('Falha ao instalar via winget.'))
+            except Exception as e:
+                QtCore.QTimer.singleShot(0, lambda: self.show_error_msg(f'Erro winget: {e}'))
 
         threading.Thread(target=worker, daemon=True).start()
 
