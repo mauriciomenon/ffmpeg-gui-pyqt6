@@ -5,13 +5,14 @@ import os
 import sys
 import subprocess
 import json
-from functools import partial
+import platform
 import threading
-import urllib.request
 import webbrowser
-from pathlib import Path
+import tempfile
 import zipfile
-import shutil
+import shlex
+from io import BytesIO
+from functools import partial
 
 from PyQt6 import QtWidgets, QtCore
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox, QFileDialog, QCheckBox, QHBoxLayout, QVBoxLayout
@@ -32,9 +33,15 @@ class FFmpegGuiPyQt6(QWidget):
         about_btn.clicked.connect(self.show_about)
         info_btn = QPushButton('Informações do video')
         info_btn.clicked.connect(self.show_video_info)
+        dl_btn = QPushButton('Baixar FFmpeg')
+        dl_btn.clicked.connect(self.download_ffmpeg_and_maybe_install)
+        winget_btn = QPushButton('Instalar FFmpeg (winget)')
+        winget_btn.clicked.connect(self.install_ffmpeg_via_winget)
         top_layout.addWidget(about_btn)
         top_layout.addStretch()
         top_layout.addWidget(info_btn)
+        top_layout.addWidget(dl_btn)
+        top_layout.addWidget(winget_btn)
         layout.addLayout(top_layout)
 
         # input file
@@ -72,7 +79,7 @@ class FFmpegGuiPyQt6(QWidget):
         # format + codecs
         grid = QtWidgets.QGridLayout()
         grid.addWidget(QLabel('Formato de Saída:'), 0, 0)
-        self.format_combo = QComboBox(); self.format_combo.addItems(['mp4','avi','mkv','flv','mov','mp3','wmv'])
+        self.format_combo = QComboBox(); self.format_combo.addItems(['mp4','avi','mkv','flv','mov','mp3','wmv','asf'])
         self.format_combo.currentIndexChanged.connect(self.update_command_display)
         grid.addWidget(self.format_combo, 0, 1)
 
@@ -112,6 +119,13 @@ class FFmpegGuiPyQt6(QWidget):
         self.audio_channels.currentIndexChanged.connect(self.update_command_display)
         grid.addWidget(self.audio_channels, 8, 1)
 
+        # no-audio checkbox positioned near audio controls
+        no_audio_row = QHBoxLayout()
+        self.no_audio_chk = QCheckBox('Arquivo sem áudio (-an)')
+        self.no_audio_chk.stateChanged.connect(self.on_no_audio_change)
+        no_audio_row.addWidget(self.no_audio_chk)
+        grid.addLayout(no_audio_row, 9, 0, 1, 2)
+
         layout.addLayout(grid)
 
         # ffmpeg path
@@ -125,17 +139,6 @@ class FFmpegGuiPyQt6(QWidget):
         ff_browse.clicked.connect(self.select_ffmpeg)
         h.addWidget(ff_browse)
         layout.addLayout(h)
-
-        # Download button and no-audio checkbox
-        h2 = QHBoxLayout()
-        self.download_btn = QPushButton('Baixar FFmpeg (Downloads)')
-        self.download_btn.clicked.connect(self.download_ffmpeg_and_maybe_install)
-        h2.addWidget(self.download_btn)
-        h2.addStretch()
-        self.no_audio_chk = QCheckBox('Arquivo sem áudio (remover áudio)')
-        self.no_audio_chk.stateChanged.connect(self.on_no_audio_change)
-        h2.addWidget(self.no_audio_chk)
-        layout.addLayout(h2)
 
         # command display
         layout.addWidget(QLabel('Comando FFmpeg:'))
@@ -179,91 +182,9 @@ class FFmpegGuiPyQt6(QWidget):
         if file:
             self.ffmpeg_path.setText(file)
 
-    def _extract_ffmpeg_zip(self, zip_path, target_bin_dir):
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                temp_dir = target_bin_dir.parent / ('ffmpeg_tmp')
-                if temp_dir.exists():
-                    shutil.rmtree(temp_dir)
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                zf.extractall(path=temp_dir)
-
-                exe_name = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
-                found = None
-                for root, dirs, files in os.walk(temp_dir):
-                    if exe_name in files:
-                        found = Path(root) / exe_name
-                        break
-                if not found:
-                    for root, dirs, files in os.walk(temp_dir):
-                        for d in dirs:
-                            p = Path(root) / d / 'bin' / exe_name
-                            if p.exists():
-                                found = p
-                                break
-                        if found:
-                            break
-                if found:
-                    target_bin_dir.mkdir(parents=True, exist_ok=True)
-                    target_path = target_bin_dir / exe_name
-                    shutil.copy2(found, target_path)
-                    if os.name != 'nt':
-                        target_path.chmod(0o755)
-                    shutil.rmtree(temp_dir)
-                    return str(target_path)
-                else:
-                    shutil.rmtree(temp_dir)
-                    return None
-        except Exception:
-            return None
-
-    def download_ffmpeg_and_maybe_install(self):
-        def _worker():
-            try:
-                downloads = Path.home() / 'Downloads'
-                downloads.mkdir(parents=True, exist_ok=True)
-                if os.name == 'nt':
-                    url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip'
-                    out_path = downloads / url.split('/')[-1]
-                    QtWidgets.QMessageBox.information(self, 'Download', f'Baixando FFmpeg para {out_path} ...')
-                    urllib.request.urlretrieve(url, out_path)
-                    target_bin = Path(os.path.dirname(os.path.abspath(__file__))) / 'bin'
-                    extracted = self._extract_ffmpeg_zip(out_path, target_bin)
-                    if extracted:
-                        QtWidgets.QMessageBox.information(self, 'Download', f'FFmpeg extraído para {extracted}. Atualizando caminho...')
-                        self.ffmpeg_path.setText(extracted)
-                    else:
-                        QtWidgets.QMessageBox.warning(self, 'Download', f'Não foi possível extrair o executável FFmpeg automaticamente. O arquivo está em {out_path}')
-
-                    res = subprocess.run(['winget', '--version'], capture_output=True, text=True)
-                    if res.returncode == 0:
-                        ans = QtWidgets.QMessageBox.question(self, 'Instalar', 'Deseja tentar instalar via winget (Windows)?')
-                        if ans == QtWidgets.QMessageBox.StandardButton.Yes:
-                            proc = subprocess.run(['winget','install','ffmpeg','-e'], capture_output=True, text=True)
-                            if proc.returncode == 0:
-                                QtWidgets.QMessageBox.information(self, 'Instalação', 'FFmpeg instalado via winget com sucesso.')
-                            else:
-                                QtWidgets.QMessageBox.warning(self, 'Instalação', f'Falha na instalação via winget. Saída:\n{proc.stdout}\n{proc.stderr}')
-                    else:
-                        QtWidgets.QMessageBox.warning(self, 'winget', 'winget não está disponível neste sistema.')
-                else:
-                    webbrowser.open('https://github.com/BtbN/FFmpeg-Builds/releases')
-                    QtWidgets.QMessageBox.information(self, 'Download', 'Página de releases aberta no navegador. Faça o download manualmente.')
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao baixar/instalar FFmpeg: {e}')
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def on_no_audio_change(self):
-        checked = self.no_audio_chk.isChecked()
-        self.audio_bitrate.setDisabled(checked)
-        self.audio_sample_rate.setDisabled(checked)
-        self.audio_channels.setDisabled(checked)
-        self.update_command_display()
-
     def set_default_options(self):
         self.format_combo.setCurrentText('wmv')
-        self.resolution_combo.setCurrentText('320x240')
+        self.resolution_combo.setCurrentText('original')
         self.video_codec_combo.setCurrentText('wmv2')
         self.audio_codec_combo.setCurrentText('wmav2')
         self.video_bitrate.setText('204800')
@@ -290,7 +211,7 @@ class FFmpegGuiPyQt6(QWidget):
         self.output_edit.setText(d.get('default_output_dir',''))
         self.video_codec_combo.setCurrentText(d.get('default_video_codec','wmv2'))
         self.audio_codec_combo.setCurrentText(d.get('default_audio_codec','wmav2'))
-        self.resolution_combo.setCurrentText(d.get('default_resolution','320x240'))
+        self.resolution_combo.setCurrentText(d.get('default_resolution','original'))
         self.video_bitrate.setText(d.get('video_bitrate','204800'))
         self.audio_bitrate.setText(d.get('audio_bitrate','65536'))
         self.frame_rate.setText(d.get('frame_rate','20'))
@@ -298,7 +219,8 @@ class FFmpegGuiPyQt6(QWidget):
         self.audio_channels.setCurrentText(d.get('audio_channels','1'))
         self.same_dir_chk.setChecked(d.get('use_same_directory','False')=='True')
         self.overwrite_chk.setChecked(d.get('overwrite_existing','True')=='True')
-        self.no_audio_chk.setChecked(d.get('use_same_directory','False')=='True')
+        self.no_audio_chk.setChecked(d.get('no_audio','False')=='True')
+        self.on_no_audio_change()  # apply UI disable state
         self.update_command_display()
 
     def save_config(self):
@@ -320,12 +242,13 @@ class FFmpegGuiPyQt6(QWidget):
             'audio_sample_rate': self.audio_sample_rate.text(),
             'audio_channels': self.audio_channels.currentText(),
             'use_same_directory': str(self.same_dir_chk.isChecked()),
-            'overwrite_existing': str(self.overwrite_chk.isChecked())
+            'overwrite_existing': str(self.overwrite_chk.isChecked()),
+            'no_audio': str(self.no_audio_chk.isChecked()),
         }
         with open(file, 'w') as f:
             cp.write(f)
 
-    def build_command(self):
+    def build_command_list(self):
         inp = self.input_edit.text()
         fmt = self.format_combo.currentText()
         video_bitrate = self.video_bitrate.text()
@@ -344,43 +267,45 @@ class FFmpegGuiPyQt6(QWidget):
             out_dir = self.output_edit.text()
         output_file = os.path.join(out_dir, os.path.splitext(os.path.basename(inp))[0] + '.' + fmt) if inp else ''
 
-        cmd = f'"{ffmpeg}" -y -i "{inp}"' if inp else ''
+        if not inp:
+            return []
+        args = [ffmpeg, '-y', '-i', inp]
         if video_bitrate:
-            cmd += f' -b:v {video_bitrate}'
-        if not self.no_audio_chk.isChecked():
-            if audio_bitrate:
-                cmd += f' -b:a {audio_bitrate}'
-        if resolution != 'original':
-            cmd += f' -s {resolution}'
-        if frame_rate:
-            cmd += f' -r {frame_rate}'
-        if not self.no_audio_chk.isChecked():
-            if audio_sample_rate:
-                cmd += f' -ar {audio_sample_rate}'
-            if audio_channels:
-                cmd += f' -ac {audio_channels}'
-        if video_codec != 'auto':
-            cmd += f' -vcodec {video_codec}'
-        if not self.no_audio_chk.isChecked():
-            if audio_codec != 'auto':
-                cmd += f' -acodec {audio_codec}'
+            args += ['-b:v', video_bitrate]
         if self.no_audio_chk.isChecked():
-            cmd += ' -an'
+            args += ['-an']
+        elif audio_bitrate:
+            args += ['-b:a', audio_bitrate]
+        if resolution != 'original':
+            args += ['-s', resolution]
+        if frame_rate:
+            args += ['-r', frame_rate]
+        if not self.no_audio_chk.isChecked() and audio_sample_rate:
+            args += ['-ar', audio_sample_rate]
+        if not self.no_audio_chk.isChecked() and audio_channels:
+            args += ['-ac', audio_channels]
+        if video_codec != 'auto':
+            args += ['-vcodec', video_codec]
+        if not self.no_audio_chk.isChecked() and audio_codec != 'auto':
+            args += ['-acodec', audio_codec]
         if output_file:
-            cmd += f' "{output_file}"'
-        return cmd
+            args += [output_file]
+        return args
 
     def update_command_display(self):
-        cmd = self.build_command()
-        self.command_display.setPlainText(cmd)
+        args = self.build_command_list()
+        if not args:
+            self.command_display.setPlainText('')
+            return
+        self.command_display.setPlainText(' '.join(shlex.quote(a) for a in args))
 
     def convert_video(self):
-        cmd = self.build_command()
-        if not cmd:
+        args = self.build_command_list()
+        if not args:
             QtWidgets.QMessageBox.warning(self, 'Erro', 'Preencha os campos necessários')
             return
         try:
-            subprocess.run(cmd, shell=True, check=True)
+            subprocess.run(args, check=True)
             QtWidgets.QMessageBox.information(self, 'Sucesso', 'Vídeo convertido com sucesso!')
         except subprocess.CalledProcessError as e:
             QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao converter vídeo.\nErro: {e}')
@@ -393,7 +318,19 @@ class FFmpegGuiPyQt6(QWidget):
         if not inp:
             QtWidgets.QMessageBox.warning(self, 'Atenção', 'Nenhum arquivo selecionado')
             return
-        ffprobe = os.path.join(os.path.dirname(self.ffmpeg_path.text()), 'ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+        # Resolve ffprobe path: if ffmpeg_path is a directory or a full path, try alongside; otherwise fall back to PATH
+        configured = self.ffmpeg_path.text().strip()
+        ffprobe_name = 'ffprobe.exe' if os.name == 'nt' else 'ffprobe'
+        candidate = None
+        if configured and os.path.isabs(configured):
+            base = configured
+            if os.path.isdir(base):
+                candidate = os.path.join(base, ffprobe_name)
+            else:
+                candidate = os.path.join(os.path.dirname(base), ffprobe_name)
+        if not candidate or not os.path.exists(candidate):
+            candidate = ffprobe_name  # rely on PATH
+        ffprobe = candidate
         if not os.path.exists(ffprobe):
             QtWidgets.QMessageBox.critical(self, 'Erro', 'ffprobe não encontrado no caminho do ffmpeg')
             return
@@ -416,6 +353,111 @@ class FFmpegGuiPyQt6(QWidget):
             dlg.exec()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Erro', f'Falha ao obter info: {e}')
+
+    def on_no_audio_change(self):
+        disabled = self.no_audio_chk.isChecked()
+        self.audio_codec_combo.setDisabled(disabled)
+        self.audio_bitrate.setDisabled(disabled)
+        self.audio_sample_rate.setDisabled(disabled)
+        self.audio_channels.setDisabled(disabled)
+        self.update_command_display()
+
+    # -------- FFmpeg download helpers --------
+    def _get_latest_ffmpeg_windows_zip_url(self):
+        # Try GitHub API (BtbN/FFmpeg-Builds) for latest win64 gpl zip; fallback to a known asset name
+        try:
+            import requests
+            api = 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest'
+            resp = requests.get(api, timeout=10)
+            if resp.ok:
+                data = resp.json()
+                for asset in data.get('assets', []):
+                    name = asset.get('name','')
+                    if name.endswith('win64-gpl.zip'):
+                        return asset.get('browser_download_url')
+        except Exception:
+            pass
+        # Fallback to latest/download with a common asset name
+        return 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip'
+
+    def _extract_ffmpeg_zip(self, zip_bytes):
+        # Extract to ./bin and return inferred ffmpeg path
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
+        os.makedirs(base_dir, exist_ok=True)
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            zf.extractall(base_dir)
+        # try to find ffmpeg(.exe)
+        ffmpeg_path = None
+        for root, dirs, files in os.walk(base_dir):
+            for f in files:
+                if f.lower() == ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'):
+                    ffmpeg_path = os.path.join(root, f)
+                    break
+            if ffmpeg_path:
+                break
+        return ffmpeg_path
+
+    def download_ffmpeg_and_maybe_install(self):
+        # On non-Windows, open releases page; on Windows, download and extract
+        if platform.system() != 'Windows':
+            webbrowser.open('https://github.com/BtbN/FFmpeg-Builds/releases')
+            QtWidgets.QMessageBox.information(self, 'FFmpeg', 'Em sistemas não Windows, abrimos a página de releases para download manual.')
+            return
+
+        def worker():
+            try:
+                import requests
+                url = self._get_latest_ffmpeg_windows_zip_url()
+                r = requests.get(url, timeout=30)
+                r.raise_for_status()
+                ff = self._extract_ffmpeg_zip(r.content)
+                if ff:
+                    # Update UI on main thread
+                    QtCore.QTimer.singleShot(0, lambda: self.ffmpeg_path.setText(ff))
+                    QtCore.QTimer.singleShot(0, lambda: self.show_info_msg('FFmpeg baixado e extraído com sucesso.'))
+                else:
+                    QtCore.QTimer.singleShot(0, lambda: self.show_error_msg('Não foi possível localizar o executável ffmpeg após extração.'))
+            except Exception as e:
+                QtCore.QTimer.singleShot(0, lambda: self.show_error_msg(f'Falha no download: {e}'))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def install_ffmpeg_via_winget(self):
+        if platform.system() != 'Windows':
+            self.show_error_msg('Instalação via winget só está disponível no Windows.')
+            return
+
+        def worker():
+            try:
+                # Try common ids: Gyan.FFmpeg, then FFmpeg.FFmpeg
+                cmds = [
+                    ['winget', 'install', '-e', '--id', 'Gyan.FFmpeg'],
+                    ['winget', 'install', '-e', '--id', 'FFmpeg.FFmpeg']
+                ]
+                ok = False
+                for c in cmds:
+                    p = subprocess.run(c, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    if p.returncode == 0:
+                        ok = True
+                        break
+                if ok:
+                    # After install, assume ffmpeg is on PATH
+                    QtCore.QTimer.singleShot(0, lambda: self.ffmpeg_path.setText('ffmpeg'))
+                    QtCore.QTimer.singleShot(0, lambda: self.show_info_msg('FFmpeg instalado via winget.'))
+                else:
+                    QtCore.QTimer.singleShot(0, lambda: self.show_error_msg('Falha ao instalar via winget.'))
+            except Exception as e:
+                QtCore.QTimer.singleShot(0, lambda: self.show_error_msg(f'Erro winget: {e}'))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.pyqtSlot(str)
+    def show_info_msg(self, msg):
+        QtWidgets.QMessageBox.information(self, 'Info', msg)
+
+    @QtCore.pyqtSlot(str)
+    def show_error_msg(self, msg):
+        QtWidgets.QMessageBox.critical(self, 'Erro', msg)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
