@@ -14,6 +14,7 @@ import shlex
 import tarfile
 from io import BytesIO
 from functools import partial
+from utils_safe_extract import safe_tar_extract, safe_zip_extract
 
 from PyQt6 import QtWidgets, QtCore
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox, QFileDialog, QCheckBox, QHBoxLayout, QVBoxLayout, QProgressDialog
@@ -454,7 +455,7 @@ class FFmpegGuiPyQt6(QWidget):
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
         os.makedirs(base_dir, exist_ok=True)
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
-            self._safe_zip_extract(zf, base_dir)
+            safe_zip_extract(zf, base_dir)
         # try to find ffmpeg(.exe)
         ffmpeg_path = None
         for root, dirs, files in os.walk(base_dir):
@@ -498,7 +499,7 @@ class FFmpegGuiPyQt6(QWidget):
                         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'bin'))
                         os.makedirs(base_dir, exist_ok=True)
                         with tarfile.open(fileobj=BytesIO(content), mode='r:xz') as tf:
-                            self._safe_tar_extract(tf, base_dir)
+                            safe_tar_extract(tf, base_dir)
                         # procurar binário
                         ffmpeg_path = None
                         for root, dirs, files in os.walk(base_dir):
@@ -561,36 +562,7 @@ class FFmpegGuiPyQt6(QWidget):
     def show_error_msg(self, msg):
         QtWidgets.QMessageBox.critical(self, 'Erro', msg)
 
-    # ---- security helpers ----
-    def _safe_tar_extract(self, tf: tarfile.TarFile, base_dir: str):
-        base = os.path.realpath(base_dir)
-        for member in tf.getmembers():
-            member_path = os.path.realpath(os.path.join(base, member.name))
-            if not member_path.startswith(base + os.sep) and member_path != base:
-                raise RuntimeError(f"Entrada insegura no tar: {member.name}")
-        tf.extractall(base)
-
-    def _safe_zip_extract(self, zf: zipfile.ZipFile, base_dir: str):
-        base = os.path.realpath(base_dir)
-        for zi in zf.infolist():
-            name = zi.filename
-            # reject absolute paths or drive letters
-            if os.path.isabs(name) or (
-                len(name) > 1 and name[1] == ':'
-            ):
-                raise RuntimeError(f"Entrada insegura no zip (absoluta): {name}")
-            dest = os.path.realpath(os.path.join(base, name))
-            if not dest.startswith(base + os.sep) and dest != base:
-                raise RuntimeError(f"Entrada insegura no zip: {name}")
-        # after validation, extract members
-        for zi in zf.infolist():
-            dest = os.path.realpath(os.path.join(base, zi.filename))
-            if zi.is_dir() or zi.filename.endswith('/'):
-                os.makedirs(dest, exist_ok=True)
-                continue
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with zf.open(zi, 'r') as src, open(dest, 'wb') as out:
-                out.write(src.read())
+    # ---- security helpers moved to utils_safe_extract ----
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

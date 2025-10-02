@@ -1,0 +1,10 @@
+# direnv example for ffmpeg-gui-pyqt6
+
+# Use pyenv local version if present
+use python
+
+# Create venv if missing and activate
+layout python
+
+# Optional: set Qt environment tweaks
+# export QT_LOGGING_RULES="*.debug=false;qt.qpa.*=false"
