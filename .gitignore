@@ -1,0 +1,43 @@
+# Build artifacts
+build/
+dist/
+*.spec
+*.dmg
+*.zip
+*.exe
+*.app
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE files
+.vscode/settings.json
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+version_info.txt
+
+# Package files
+*.pkg
+*.deb
+*.rpm
+
+# Lock files
+package-lock.json
+Pipfile.lock

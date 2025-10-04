@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ffmpeg-gui-pyqt6"
+version = "1.2.0"
+description = "Graphical user interface for FFmpeg video conversion"
+authors = [
+    {name = "FFmpeg GUI Contributors"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "PyQt6>=6.4.0",
+    "ffmpeg-python>=0.2.0"
+]
+keywords = ["ffmpeg", "video", "conversion", "gui", "pyqt6"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video :: Conversion"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pyinstaller>=6.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/ffmpeg-gui-pyqt6"
+Repository = "https://github.com/yourusername/ffmpeg-gui-pyqt6"
+Issues = "https://github.com/yourusername/ffmpeg-gui-pyqt6/issues"
+
+[project.scripts]
+ffmpeg-gui = "GUI_pyqt6_WINFF:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.pyinstaller]
+# Configuration for PyInstaller builds

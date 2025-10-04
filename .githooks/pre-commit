@@ -26,11 +26,37 @@ while IFS= read -r -d '' f; do
   fi
 done < <(git ls-files -z)
 
+echo "[pre-commit] Checking writing standards..."
+# Check for forbidden characters and phrases
+FORBIDDEN_PATTERNS=(
+  "made with love|feito com amor"
+  "ultimate|final|professional|enhanced|improved|optimized"
+  "amazing|awesome|incredible|fantastic|revolutionary"
+  "cutting-edge|state-of-the-art|next-generation|world-class"
+  "[🎉✅❌⚠️📚❤️⭐]"
+  "[àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ]"
+)
+
+for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+  if git diff --cached --name-only | grep -E '\.(md|txt|py)$' | xargs grep -l -i -E "$pattern" 2>/dev/null; then
+    echo "Error: forbidden content found matching pattern: $pattern" >&2
+    echo "See .github/CONTRIBUTING_RULES.md for writing standards" >&2
+    exit 1
+  fi
+done
+
+# Check for spaces in file/directory names
+if git diff --cached --name-only | grep -E ' '; then
+  echo "Error: spaces found in file/directory names" >&2
+  echo "Use underscores or hyphens instead" >&2
+  exit 1
+fi
+
 echo "[pre-commit] Running pytest (if available)..."
 if command -v pytest >/dev/null 2>&1; then
-  QT_QPA_PLATFORM=offscreen pytest -q
+  PYTHONPATH=. QT_QPA_PLATFORM=offscreen pytest tests/ -q
 elif [ -x ".venv/bin/pytest" ]; then
-  QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q
+  PYTHONPATH=. QT_QPA_PLATFORM=offscreen .venv/bin/pytest tests/ -q
 else
   echo "pytest not found, skipping tests. Install with: python -m pip install -r requirements.txt" >&2
 fi
