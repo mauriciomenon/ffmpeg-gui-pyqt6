@@ -26,7 +26,28 @@ A graphical user interface for FFmpeg video conversion with both PyQt6 and Tkint
 - Python 3.8 or higher
 - FFmpeg (can be downloaded through the application)
 
-### From Source
+### Quick Setup (Automated Scripts)
+
+**Windows:**
+```cmd
+# Double-click setup_windows.bat or run in Command Prompt:
+setup_windows.bat
+
+# Then run the application:
+run_windows.bat
+```
+
+**macOS/Linux:**
+```bash
+# Make executable and run setup:
+chmod +x setup_macos.sh
+./setup_macos.sh
+
+# Then run the application:
+./run_macos.sh
+```
+
+### Manual Installation
 
 1. **Clone the repository:**
    ```bash
