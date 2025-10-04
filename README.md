@@ -35,21 +35,37 @@ A graphical user interface for FFmpeg video conversion with both PyQt6 and Tkint
    ```
 
 2. **Set up virtual environment:**
+   
+   **Windows:** See detailed guide in [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)
+   ```cmd
+   python -m venv .venv
+   .venv\Scripts\activate.bat
+   ```
+   
+   **macOS/Linux:**
    ```bash
    python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   source .venv/bin/activate
    ```
 
 3. **Install dependencies:**
    ```bash
+   # All platforms
    pip install -r requirements.txt
    ```
 
 4. **Run the application:**
-   ```bash
-   # PyQt6 version
-   python GUI_pyqt6_WINFF.py
    
+   **Windows:**
+   ```cmd
+   python GUI_pyqt6_WINFF.py
+   rem Or Tkinter version
+   python GUI_tkinter_WINFF.py
+   ```
+   
+   **macOS/Linux:**
+   ```bash
+   python GUI_pyqt6_WINFF.py
    # Or Tkinter version
    python GUI_tkinter_WINFF.py
    ```
