@@ -61,9 +61,10 @@ pyinstaller --onefile --windowed --name=FFmpeg_GUI_Windows_AMD64 ^
     --hidden-import=ffmpeg ^
     --hidden-import=ssl ^
     --hidden-import=urllib3 ^
-    --icon=icon.ico ^
     GUI_pyqt6_WINFF.py
 ```
+
+**Note:** Icon line removed. To add custom icon, create `icon.ico` and add `--icon=icon.ico` to the command.
 
 ## Output
 - **Executable**: `dist\FFmpeg_GUI_Windows_AMD64.exe`
