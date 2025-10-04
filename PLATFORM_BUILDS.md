@@ -2,7 +2,7 @@
 
 ## Current Build Status
 
-### macOS ARM64 ✓ COMPLETE
+### macOS ARM64 - COMPLETE
 - **File**: `FFmpeg_GUI_macOS_ARM64.dmg` (68MB)
 - **Type**: DMG installer containing .app bundle
 - **Architecture**: ARM64 (Apple Silicon M1/M2/M3)
@@ -10,7 +10,7 @@
 - **Installation**: Mount DMG, drag .app to Applications
 - **Execution**: Double-click or `open FFmpeg_GUI.app`
 
-### Windows AMD64 ⚠️ CROSS-COMPILED
+### Windows AMD64 - CROSS-COMPILED
 - **File**: Previous attempt created ARM64 Mach-O (not real Windows .exe)
 - **Issue**: Cross-compilation from macOS creates macOS executable, not Windows
 - **Solution**: Native build files created for Windows systems
@@ -83,12 +83,12 @@ jobs:
 
 ```
 Repository Files:
-├── FFmpeg_GUI_macOS_ARM64.dmg        # ✓ Ready for distribution
-├── build_macos.py                    # ✓ Working macOS builder
-├── build_windows.py                  # ⚠️ Cross-compile only
-├── build_windows_native.py           # ✓ Creates Windows build files
-├── FFmpeg_GUI_Windows.spec           # ✓ For native Windows build
-└── BUILD_WINDOWS_NATIVE.md           # ✓ Windows build instructions
+├── FFmpeg_GUI_macOS_ARM64.dmg        # Ready for distribution
+├── build_macos.py                    # Working macOS builder
+├── build_windows.py                  # Cross-compile only
+├── build_windows_native.py           # Creates Windows build files
+├── FFmpeg_GUI_Windows.spec           # For native Windows build
+└── BUILD_WINDOWS_NATIVE.md           # Windows build instructions
 ```
 
 ## Distribution Strategy
@@ -109,7 +109,7 @@ Repository Files:
 
 ## Summary
 
-- **macOS ARM64**: ✓ Complete with DMG installer
+- **macOS ARM64**: Complete with DMG installer
 - **Windows AMD64**: Spec files ready, needs native Windows build
 - **Cross-compilation**: Not viable for Windows executables
 - **PyInstaller PKG**: Internal step, not macOS installer format

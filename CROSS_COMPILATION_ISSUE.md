@@ -114,14 +114,14 @@ wine python.exe -m PyInstaller FFmpeg_GUI_Windows.spec
 ## Current Status
 
 ### Working Solutions
-- ✅ **macOS ARM64**: Native build complete (`FFmpeg_GUI_macOS_ARM64.dmg`)
-- ✅ **Windows AMD64**: Spec files ready for native build
-- ✅ **Documentation**: Complete build instructions provided
+- macOS ARM64: Native build complete (`FFmpeg_GUI_macOS_ARM64.dmg`)
+- Windows AMD64: Spec files ready for native build
+- Documentation: Complete build instructions provided
 
 ### Not Working
-- ❌ **Cross-compilation**: PyInstaller limitation (not configuration error)
-- ❌ **Wine approach**: Complex, unreliable for distribution
-- ❌ **Docker Windows**: Resource intensive, complex setup
+- Cross-compilation: PyInstaller limitation (not configuration error)
+- Wine approach: Complex, unreliable for distribution
+- Docker Windows: Resource intensive, complex setup
 
 ## Conclusion
 

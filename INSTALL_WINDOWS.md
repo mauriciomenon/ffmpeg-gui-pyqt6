@@ -4,7 +4,7 @@
 
 ### Prerequisites
 1. **Download Python 3.8+** from [python.org](https://www.python.org/downloads/)
-   - ✅ **IMPORTANT**: Check "Add Python to PATH" during installation
+   - **IMPORTANT**: Check "Add Python to PATH" during installation
    - Choose "Custom Installation" > Check "Add Python to environment variables"
 
 2. **Verify Python Installation:**
