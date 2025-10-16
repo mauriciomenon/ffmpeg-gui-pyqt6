@@ -49,7 +49,8 @@ def build_windows_exe():
     pyinstaller_cmd = [
         'pyinstaller',
         '--onefile',  # Single executable file
-        '--console',  # Keep console for cross-platform compatibility
+        #'--console',  # Keep console for cross-platform compatibility
+        '--windowed',  # No console window
         '--name=FFmpeg_GUI_Windows_AMD64',
         '--add-data=utils_safe_extract.py' + (';.' if sys.platform == 'win32' else ':.'),
         '--hidden-import=PyQt6.QtCore',

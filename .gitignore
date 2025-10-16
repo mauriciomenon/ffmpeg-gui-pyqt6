@@ -41,3 +41,4 @@ version_info.txt
 # Lock files
 package-lock.json
 Pipfile.lock
+.DS_Store
